@@ -50,6 +50,12 @@ const App = {
         localStorage.setItem('cinetrack_currentUser', username);
         document.getElementById('userNameDisplay').innerText = username;
         
+        // Also update profile tab username
+        const profileUserName = document.getElementById('profileUserNameFull');
+        if (profileUserName) {
+            profileUserName.innerText = username;
+        }
+        
         // Data Migration / Loading
         if (!localStorage.getItem('cinetrack_migrated') && localStorage.getItem('cinetrack_movies')) {
             this.state.movies = JSON.parse(localStorage.getItem('cinetrack_movies')) || [];
@@ -81,14 +87,38 @@ const App = {
         } else if (this.currentUser === 'kermode') {
             this.triggerKermodeAdmin();
         } else {
-            document.documentElement.style.setProperty('--primary', '#6366f1');
-            document.documentElement.style.setProperty('--bg', '#0d0f14');
+            document.documentElement.style.removeProperty('--primary');
+            document.documentElement.style.removeProperty('--bg');
+        }
+
+        // Load Theme
+        let savedTheme = localStorage.getItem(`cinetrack_${this.currentUser}_theme`);
+        if (!savedTheme) {
+            savedTheme = (this.currentUser === 'deniz') ? 'deniz' : 'default';
+        }
+        this.changeTheme(savedTheme, false);
+    },
+
+    changeTheme(theme, showToast = true) {
+        document.documentElement.setAttribute('data-theme', theme);
+        localStorage.setItem(`cinetrack_${this.currentUser}_theme`, theme);
+        
+        // Update active class on cards
+        document.querySelectorAll('.theme-card').forEach(card => {
+            if (card.dataset.theme === theme) {
+                card.classList.add('active');
+            } else {
+                card.classList.remove('active');
+            }
+        });
+
+        if (showToast) {
+            this.showToast('Tema değiştirildi');
         }
     },
 
     triggerDenizEasterEgg() {
-        document.documentElement.style.setProperty('--primary', '#00f2fe');
-        document.documentElement.style.setProperty('--bg', '#020b14');
+        document.getElementById('themeDeniz').style.display = 'flex';
         
         const audio = new Audio('https://actions.google.com/sounds/v1/cartoon/magic_chime.ogg');
         audio.volume = 0.5;
@@ -120,7 +150,7 @@ const App = {
             }());
         }
         
-        setTimeout(() => this.showToast('Deniz için özel efektler aktif! 🌊✨'), 1000);
+        setTimeout(() => this.showToast('Deniz için özel Başkent teması aktif! 🌊✨'), 1000);
     },
 
     triggerKermodeAdmin() {
@@ -335,7 +365,14 @@ const App = {
         const sgf = document.getElementById('seriesGenreFilter');
         if (sgf) sgf.addEventListener('change', () => this.renderSeries());
 
-        // Goal Setting
+        // Goal edit toggle
+        const editBtn = document.getElementById('goalEditBtn');
+        if (editBtn) {
+            editBtn.addEventListener('click', () => {
+                document.getElementById('goalEditSection').classList.toggle('hidden');
+            });
+        }
+
         document.getElementById('goalSetBtn').addEventListener('click', () => {
             const val = parseInt(document.getElementById('goalInput').value);
             if (val > 0) {
@@ -343,6 +380,7 @@ const App = {
                 this.save();
                 this.renderDashboard();
                 this.showToast('Hedef güncellendi');
+                document.getElementById('goalEditSection').classList.add('hidden');
             }
         });
     },
@@ -358,6 +396,7 @@ const App = {
         if (tab === 'dashboard') this.renderDashboard();
         if (tab === 'movies') this.renderMovies();
         if (tab === 'series') this.renderSeries();
+        // Profile tab doesn't need specific render logic right now
     },
 
     // Star rating was removed from the add modal
@@ -385,9 +424,19 @@ const App = {
                     const poster = item.poster_path ? `https://image.tmdb.org/t/p/w200${item.poster_path}` : '';
                     const icon = type === 'movie' ? '🎬' : '📺';
                     
+                    const lowerTitle = title.toLowerCase();
+                    const exists = type === 'movie' 
+                        ? this.state.movies.some(m => m.title.toLowerCase() === lowerTitle)
+                        : this.state.series.some(s => s.title.toLowerCase() === lowerTitle);
+                        
+                    const existingBadge = exists ? `<div class="tmdb-existing-overlay" title="Kütüphanende Ekli">✅</div>` : '';
+
                     return `
                         <div class="tmdb-item" onclick="App.selectTMDBItem('${item.id}', '${type}')">
-                            <div class="tmdb-poster">${poster ? `<img src="${poster}" style="width:100%;height:100%;object-fit:cover;border-radius:6px;"/>` : icon}</div>
+                            <div class="tmdb-poster">
+                                ${poster ? `<img src="${poster}" style="width:100%;height:100%;object-fit:cover;border-radius:6px;"/>` : icon}
+                                ${existingBadge}
+                            </div>
                             <div class="tmdb-info">
                                 <div class="tmdb-title">${title}</div>
                                 <div class="tmdb-year">${year}</div>
@@ -460,9 +509,9 @@ const App = {
         document.getElementById('formDuration').value = '';
         document.getElementById('formMovieStatus').value = 'watchlist';
         
-        document.getElementById('formSeriesStatus').value = 'watching';
-        document.getElementById('formSeasons').value = 1;
-        document.getElementById('formEpisodes').value = 10;
+        document.getElementById('formSeriesStatus').value = 'watchlist';
+        document.getElementById('formSeasons').value = '1';
+        document.getElementById('formEpisodes').value = '1';
 
         document.querySelector(`.type-btn[data-type="${type}"]`).click();
         
@@ -518,6 +567,18 @@ const App = {
 
         const type = document.querySelector('.type-btn.active').dataset.type;
         const isEdit = !!this.editingId;
+
+        // Duplication Check
+        if (!isEdit) {
+            const lowerTitle = title.toLowerCase();
+            const exists = type === 'movie' 
+                ? this.state.movies.some(m => m.title.toLowerCase() === lowerTitle)
+                : this.state.series.some(s => s.title.toLowerCase() === lowerTitle);
+                
+            if (exists) {
+                return this.showToast('Bu yapım zaten kütüphanende ekli!', true);
+            }
+        }
 
         const baseItem = {
             title,
@@ -765,11 +826,42 @@ const App = {
         document.getElementById('goalInput').value = this.state.goal;
         document.getElementById('goalTarget').innerText = this.state.goal;
         document.getElementById('goalCurrent').innerText = this.state.goalCurrent;
-        document.getElementById('goalCurrentText').innerText = this.state.goalCurrent;
         
         const goalPerc = Math.min(100, Math.round((this.state.goalCurrent / this.state.goal) * 100));
-        const offset = 201 - (201 * goalPerc) / 100;
+        const offset = 314 - (314 * goalPerc) / 100;
         document.getElementById('goalRing').style.strokeDashoffset = offset;
+
+        const svgElement = document.querySelector('.goal-svg');
+        const rankEl = document.getElementById('goalRank');
+        const msgEl = document.getElementById('goalMessage');
+        const emojiEl = document.getElementById('goalEmoji');
+
+        if (goalPerc === 0) {
+            rankEl.innerText = 'Başlangıç Çizgisi';
+            msgEl.innerText = 'Haftaya yeni başladık, favori dizini açma vakti!';
+            emojiEl.innerText = '🍿';
+            svgElement.classList.remove('completed');
+        } else if (goalPerc < 50) {
+            rankEl.innerText = 'Çaylak İzleyici';
+            msgEl.innerText = 'Isınma turları! İlerlemeye devam et.';
+            emojiEl.innerText = '📺';
+            svgElement.classList.remove('completed');
+        } else if (goalPerc < 100) {
+            rankEl.innerText = 'İstikrarlı İzleyici';
+            msgEl.innerText = 'Harika gidiyorsun, hedefine çok az kaldı!';
+            emojiEl.innerText = '👀';
+            svgElement.classList.remove('completed');
+        } else if (this.state.goalCurrent > this.state.goal) {
+            rankEl.innerText = 'Efsanevi Sinefil';
+            msgEl.innerText = 'Hedefi paramparça ettin! İzlemeye doyamıyorsun!';
+            emojiEl.innerText = '🔥';
+            svgElement.classList.add('completed');
+        } else {
+            rankEl.innerText = 'Görev Tamamlandı';
+            msgEl.innerText = 'İşte bu! Haftalık hedefine ulaştın.';
+            emojiEl.innerText = '🏆';
+            svgElement.classList.add('completed');
+        }
     },
 
     renderMovies() {
@@ -797,7 +889,12 @@ const App = {
 
         if (filtered.length === 0) {
             if (this.state.movies.length === 0 && !search && filter === 'all') {
-                grid.innerHTML = document.getElementById('movieEmpty').outerHTML;
+                grid.innerHTML = `
+                <div class="empty-state" id="movieEmpty">
+                    <div class="empty-icon">🎬</div>
+                    <p>Henüz film eklenmedi</p>
+                    <button class="btn-primary" id="addFirstMovieBtn">Film Ekle</button>
+                </div>`;
                 document.getElementById('addFirstMovieBtn').addEventListener('click', () => {
                     this.switchTab('movies');
                     this.openAddModal('movie');
@@ -867,7 +964,12 @@ const App = {
 
         if (filtered.length === 0) {
             if (this.state.series.length === 0 && !search && filter === 'all') {
-                list.innerHTML = document.getElementById('seriesEmpty').outerHTML;
+                list.innerHTML = `
+                <div class="empty-state" id="seriesEmpty">
+                    <div class="empty-icon">📺</div>
+                    <p>Henüz dizi eklenmedi</p>
+                    <button class="btn-primary" id="addFirstSeriesBtn">Dizi Ekle</button>
+                </div>`;
                 document.getElementById('addFirstSeriesBtn').addEventListener('click', () => {
                     this.switchTab('series');
                     this.openAddModal('series');
@@ -902,10 +1004,7 @@ const App = {
                     </div>
                     <div class="series-meta">
                         <div class="series-title">${s.title}</div>
-                        <div class="series-info-row">
-                            ${s.year ? `<span class="series-tag">${s.year}</span>` : ''}
-                            ${s.genre ? `<span class="series-tag">${s.genre}</span>` : ''}
-                        </div>
+                        <div class="series-year">${s.year || ''} ${s.genre ? `• ${s.genre}` : ''}</div>
                         ${starHtml}
                         <div class="series-prog-wrap">
                             <div class="series-prog-label">
@@ -1057,9 +1156,22 @@ const App = {
         
         s.watchedEps = [...otherSeasonsEps, ...newThisSeason];
         
+        // Automations
+        if (s.watchedEps.length > 0 && s.status === 'watchlist') {
+            s.status = 'watching';
+        }
+        if (s.watchedEps.length >= s.episodes) {
+            if (s.status !== 'completed') {
+                s.status = 'completed';
+                this.showToast('Tebrikler, dizi bitti! 🎉');
+            }
+        } else if (s.status === 'completed' && s.watchedEps.length < s.episodes) {
+            s.status = 'watching';
+        }
+        
         this.save();
         this.renderAll();
-        // Re-render modal to visually update buttons
+        // Re-render modal to visually update buttons and status dropdown
         this.openSeriesDetail(seriesId);
     },
 
@@ -1081,6 +1193,16 @@ const App = {
                     s.watchedEps.push(epId);
                     foundUnwatched = true;
                     this.state.goalCurrent++;
+                    
+                    // Automations
+                    if (s.status === 'watchlist') {
+                        s.status = 'watching';
+                    }
+                    if (s.watchedEps.length >= s.episodes && s.status !== 'completed') {
+                        s.status = 'completed';
+                        this.showToast('Tebrikler, dizi bitti! 🎉');
+                    }
+                    
                     break;
                 }
             }
@@ -1091,7 +1213,9 @@ const App = {
             this.save();
             this.renderDashboard();
             this.renderSeries();
-            this.showToast('Sonraki bölüm izlendi!');
+            if (s.status !== 'completed') {
+                this.showToast('Sonraki bölüm izlendi!');
+            }
         } else {
             this.showToast('Tüm bölümler izlenmiş');
         }

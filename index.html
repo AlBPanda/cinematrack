@@ -101,32 +101,50 @@
             <h1 class="header-title" style="font-size: 20px; font-weight:700;">Hoşgeldin, <span id="userNameDisplay" style="color:var(--primary);">...</span> 👋</h1>
             <p class="header-subtitle" style="font-size:13px; color:var(--text2); margin-top:4px;">İzleme durumun harika görünüyor!</p>
           </div>
-          <button class="logout-btn" id="logoutBtn">Çıkış</button>
         </header>
         <div class="widgets-grid">
-          <!-- Stats Widget -->
-          <div class="widget stats-widget">
-            <h3 class="widget-title">📊 İstatistikler</h3>
-            <div class="stats-row">
-              <div class="stat-card">
-                <span class="stat-num" id="statMoviesWatched">0</span>
-                <span class="stat-label">Film İzlendi</span>
+          <!-- Premium Weekly Goal Widget -->
+          <div class="widget goal-premium-widget">
+            <div class="goal-header">
+              <h3 class="widget-title" style="margin: 0;">🎯 Haftalık Maraton</h3>
+              <button class="icon-btn" id="goalEditBtn" style="width:28px; height:28px;" title="Hedefi Değiştir">
+                <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+              </button>
+            </div>
+            
+            <!-- Hidden input section -->
+            <div id="goalEditSection" class="goal-set hidden" style="margin-top: 12px; margin-bottom: 16px;">
+              <label>Yeni Hedef:</label>
+              <input type="number" id="goalInput" min="1" max="100" value="5" />
+              <button class="btn-xs" id="goalSetBtn">Kaydet</button>
+            </div>
+
+            <div class="goal-premium-content">
+              <div class="goal-circle-container">
+                <svg viewBox="0 0 120 120" width="120" height="120" class="goal-svg">
+                  <circle cx="60" cy="60" r="50" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="8"/>
+                  <circle id="goalRing" cx="60" cy="60" r="50" fill="none" stroke="url(#ringGrad)" stroke-width="8" stroke-linecap="round" stroke-dasharray="314" stroke-dashoffset="314" transform="rotate(-90 60 60)"/>
+                  <defs>
+                    <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stop-color="var(--primary)"/>
+                      <stop offset="100%" stop-color="var(--pink)"/>
+                    </linearGradient>
+                  </defs>
+                </svg>
+                <div class="goal-ring-text">
+                  <span class="goal-emoji" id="goalEmoji">🍿</span>
+                  <div class="goal-numbers">
+                    <span id="goalCurrent">0</span><span class="goal-divider">/</span><span id="goalTarget">5</span>
+                  </div>
+                </div>
               </div>
-              <div class="stat-card">
-                <span class="stat-num" id="statMoviesWatchlist">0</span>
-                <span class="stat-label">Listede</span>
-              </div>
-              <div class="stat-card">
-                <span class="stat-num" id="statSeriesTotal">0</span>
-                <span class="stat-label">Dizi</span>
-              </div>
-              <div class="stat-card">
-                <span class="stat-num" id="statEpsWatched">0</span>
-                <span class="stat-label">Bölüm</span>
+              
+              <div class="goal-text-content">
+                <div class="goal-rank" id="goalRank">Çaylak İzleyici</div>
+                <p class="goal-message" id="goalMessage">Haftaya yeni başladık, hadi biraz dizi!</p>
               </div>
             </div>
           </div>
-
           <!-- Continue Watching Widget -->
           <div class="widget continue-widget">
             <h3 class="widget-title">▶️ Devam Et</h3>
@@ -148,39 +166,6 @@
             <h3 class="widget-title">⭐ En Çok Puan Verilenler</h3>
             <div id="topRatedList" class="toprated-list">
               <div class="empty-widget">Henüz puanlanmış film yok</div>
-            </div>
-          </div>
-
-          <!-- Weekly Goal Widget -->
-          <div class="widget goal-widget">
-            <h3 class="widget-title">🎯 Haftalık Hedef</h3>
-            <div class="goal-content">
-              <div class="goal-progress-wrap">
-                <div class="goal-progress-ring">
-                  <svg viewBox="0 0 80 80" width="80" height="80">
-                    <circle cx="40" cy="40" r="32" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="6"/>
-                    <circle id="goalRing" cx="40" cy="40" r="32" fill="none" stroke="url(#ringGrad)" stroke-width="6" stroke-linecap="round" stroke-dasharray="201" stroke-dashoffset="201" transform="rotate(-90 40 40)"/>
-                    <defs>
-                      <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                        <stop offset="0%" stop-color="#a855f7"/>
-                        <stop offset="100%" stop-color="#ec4899"/>
-                      </linearGradient>
-                    </defs>
-                  </svg>
-                  <div class="goal-ring-text">
-                    <span id="goalCurrent">0</span>
-                    <small>/ <span id="goalTarget">5</span></small>
-                  </div>
-                </div>
-              </div>
-              <div class="goal-info">
-                <p>Bu hafta <strong id="goalCurrentText">0</strong> bölüm izledin</p>
-                <div class="goal-set">
-                  <label>Hedef:</label>
-                  <input type="number" id="goalInput" min="1" max="100" value="5" />
-                  <button class="btn-xs" id="goalSetBtn">Kaydet</button>
-                </div>
-              </div>
             </div>
           </div>
         </div>
@@ -241,6 +226,77 @@
           </div>
         </div>
       </section>
+
+      <!-- Profile Tab -->
+      <section class="tab-content" id="tab-profile">
+        <header class="header" style="margin-bottom: 24px;">
+          <h1 class="header-title" style="font-size: 20px; font-weight:700;">Profilim</h1>
+        </header>
+
+        <div class="profile-card">
+          <div class="profile-avatar">
+            <svg width="32" height="32" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          </div>
+          <div class="profile-info">
+            <h2 id="profileUserNameFull" style="font-size: 18px; font-weight: 700; margin-bottom: 4px;">Kullanıcı</h2>
+            <p style="font-size: 13px; color: var(--text3);">CineTrack VIP Üyesi</p>
+          </div>
+          <button class="icon-btn" onclick="App.logout()" style="color: var(--red); border-color: rgba(239, 68, 68, 0.2);" title="Çıkış Yap">
+            <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          </button>
+        </div>
+
+        <!-- Stats Widget (Moved to Profile) -->
+        <div class="widget stats-widget" style="margin-bottom: 24px;">
+          <h3 class="widget-title">📊 Kütüphane İstatistikleri</h3>
+          <div class="stats-row">
+            <div class="stat-card">
+              <span class="stat-num" id="statMoviesWatched">0</span>
+              <span class="stat-label">Film İzlendi</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-num" id="statMoviesWatchlist">0</span>
+              <span class="stat-label">Listede</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-num" id="statSeriesTotal">0</span>
+              <span class="stat-label">Dizi</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-num" id="statEpsWatched">0</span>
+              <span class="stat-label">Bölüm</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="theme-section">
+          <h3 style="font-size: 15px; font-weight: 600; margin-bottom: 8px;">Tema Seçimi</h3>
+          <p style="font-size: 13px; color: var(--text2); margin-bottom: 16px;">Uygulamanın görünümünü kendi zevkine göre özelleştir.</p>
+          <div class="theme-grid">
+            <div class="theme-card active" data-theme="default" onclick="App.changeTheme('default')">
+              <div class="theme-preview" style="background: linear-gradient(135deg, #a855f7, #ec4899);"></div>
+              <div class="theme-name">Neon Gece</div>
+            </div>
+            <div class="theme-card" data-theme="crimson" onclick="App.changeTheme('crimson')">
+              <div class="theme-preview" style="background: linear-gradient(135deg, #dc2626, #f59e0b);"></div>
+              <div class="theme-name">Kızıl Şafak</div>
+            </div>
+            <div class="theme-card" data-theme="forest" onclick="App.changeTheme('forest')">
+              <div class="theme-preview" style="background: linear-gradient(135deg, #10b981, #84cc16);"></div>
+              <div class="theme-name">Orman Fısıltısı</div>
+            </div>
+            <div class="theme-card" data-theme="glacier" onclick="App.changeTheme('glacier')">
+              <div class="theme-preview" style="background: linear-gradient(135deg, #3b82f6, #06b6d4);"></div>
+              <div class="theme-name">Buzul Mavisi</div>
+            </div>
+            <!-- Easter Egg Theme -->
+            <div class="theme-card" id="themeDeniz" style="display: none;" data-theme="deniz" onclick="App.changeTheme('deniz')">
+              <div class="theme-preview" style="background: linear-gradient(135deg, #1e3a8a, #facc15);"></div>
+              <div class="theme-name">Başkent</div>
+            </div>
+          </div>
+        </div>
+      </section>
     </main>
 
     <!-- Bottom Nav -->
@@ -258,6 +314,10 @@
         <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
         <span>Diziler</span>
         <span class="nav-badge" id="seriesBadge"></span>
+      </button>
+      <button class="nav-item" data-tab="profile" id="navProfile">
+        <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        <span>Profil</span>
       </button>
     </nav>
   </div>
