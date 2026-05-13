@@ -11,7 +11,9 @@ const App = {
         goalCurrent: 0,
         goalWeek: '',
         streak: 0,
-        lastWatchDate: null
+        lastWatchDate: null,
+        globalUsers: [],
+        currentUserData: null
     },
     
     currentTab: 'dashboard',
@@ -22,6 +24,8 @@ const App = {
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('./sw.js').catch(err => console.log('SW fail', err));
         }
+
+        this.state.globalUsers = JSON.parse(localStorage.getItem('cinetrack_global_users')) || [];
 
         const savedUser = localStorage.getItem('cinetrack_currentUser');
         if (savedUser) {
@@ -37,25 +41,69 @@ const App = {
             }, 1500);
             
             document.getElementById('loginBtn').addEventListener('click', () => {
-                const name = document.getElementById('usernameInput').value.trim();
-                if (name) {
-                    this.login(name);
+                const handle = document.getElementById('usernameInput').value.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
+                if (handle) {
+                    this.login(handle);
                     document.getElementById('loginScreen').classList.add('hidden');
                     document.getElementById('app').classList.remove('hidden');
                 }
             });
+
+            if (document.getElementById('showRegisterBtn')) {
+                document.getElementById('showRegisterBtn').addEventListener('click', () => {
+                    document.getElementById('loginCard').classList.add('hidden');
+                    document.getElementById('registerCard').classList.remove('hidden');
+                });
+                document.getElementById('showLoginBtn').addEventListener('click', () => {
+                    document.getElementById('registerCard').classList.add('hidden');
+                    document.getElementById('loginCard').classList.remove('hidden');
+                });
+                
+                document.querySelectorAll('.avatar-option').forEach(el => {
+                    el.addEventListener('click', (e) => {
+                        document.querySelectorAll('.avatar-option').forEach(a => a.classList.remove('selected'));
+                        e.currentTarget.classList.add('selected');
+                    });
+                });
+
+                document.getElementById('registerBtn').addEventListener('click', () => {
+                    const name = document.getElementById('regNameInput').value.trim();
+                    const handle = document.getElementById('regHandleInput').value.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
+                    const avatar = document.querySelector('.avatar-option.selected').innerText;
+                    
+                    if (!name || !handle) return alert('Ad ve Kullanıcı Adı zorunludur.');
+                    if (this.state.globalUsers.find(u => u.handle === handle)) return alert('Bu kullanıcı adı alınmış.');
+                    
+                    const newUser = { handle, name, avatar, createdAt: Date.now() };
+                    this.state.globalUsers.push(newUser);
+                    localStorage.setItem('cinetrack_global_users', JSON.stringify(this.state.globalUsers));
+                    
+                    this.login(handle);
+                    document.getElementById('loginScreen').classList.add('hidden');
+                    document.getElementById('app').classList.remove('hidden');
+                });
+            }
         }
     },
 
     login(username) {
         this.currentUser = username.toLowerCase();
         localStorage.setItem('cinetrack_currentUser', username);
-        document.getElementById('userNameDisplay').innerText = username;
+        
+        let userRecord = this.state.globalUsers.find(u => u.handle === this.currentUser);
+        if (!userRecord) {
+            userRecord = { handle: this.currentUser, name: username, avatar: '👨', createdAt: Date.now() };
+            this.state.globalUsers.push(userRecord);
+            localStorage.setItem('cinetrack_global_users', JSON.stringify(this.state.globalUsers));
+        }
+        this.state.currentUserData = userRecord;
+
+        document.getElementById('userNameDisplay').innerText = userRecord.name;
         
         // Also update profile tab username
         const profileUserName = document.getElementById('profileUserNameFull');
         if (profileUserName) {
-            profileUserName.innerText = username;
+            profileUserName.innerHTML = `${userRecord.name} <span style="font-size:14px; opacity:0.8; font-weight:normal;">@${userRecord.handle}</span>`;
         }
         
         // Data Migration / Loading
@@ -86,6 +134,7 @@ const App = {
             this.eventsBound = true;
         }
         this.renderAll();
+        this.updateUnreadBadges();
 
         // Easter Eggs Check
         if (this.currentUser === 'deniz') {
@@ -358,6 +407,21 @@ const App = {
         document.getElementById('movieDetailDeleteBtn').addEventListener('click', () => this.deleteItem('movie'));
         document.getElementById('seriesDetailDeleteBtn').addEventListener('click', () => this.deleteItem('series'));
 
+        // V1.5 Beta Social & Chat
+        if (document.getElementById('otherProfileCloseBtn')) document.getElementById('otherProfileCloseBtn').addEventListener('click', () => this.closeModals());
+        if (document.getElementById('chatCloseBtn')) document.getElementById('chatCloseBtn').addEventListener('click', () => this.closeModals());
+        if (document.getElementById('socialSearchInput')) {
+            document.getElementById('socialSearchInput').addEventListener('input', (e) => {
+                this.renderSocialTab(e.target.value.trim().toLowerCase());
+            });
+        }
+        if (document.getElementById('chatSendBtn')) {
+            document.getElementById('chatSendBtn').addEventListener('click', () => this.sendMessage());
+            document.getElementById('chatInput').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') this.sendMessage();
+            });
+        }
+
         // Filters
         document.querySelectorAll('#tab-movies .filter-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
@@ -413,6 +477,7 @@ const App = {
         if (tab === 'dashboard') this.renderDashboard();
         if (tab === 'movies') this.renderMovies();
         if (tab === 'series') this.renderSeries();
+        if (tab === 'social') this.renderSocialTab();
         // Profile tab doesn't need specific render logic right now
     },
 
@@ -1505,6 +1570,188 @@ const App = {
         } catch(err) {
             carousel.innerHTML = '<div class="empty-widget">Yüklenemedi.</div>';
         }
+    },
+
+    // ==========================================
+    // V1.5 BETA - SOCIAL & MESSAGING
+    // ==========================================
+
+    renderSocialTab(query = '') {
+        const list = document.getElementById('usersList');
+        if (!list) return;
+
+        let users = this.state.globalUsers.filter(u => u.handle !== this.currentUser);
+        if (query) {
+            users = users.filter(u => u.handle.includes(query) || u.name.toLowerCase().includes(query));
+        }
+
+        if (users.length === 0) {
+            list.innerHTML = '<div class="empty-widget" style="grid-column: 1/-1;">Kullanıcı bulunamadı.</div>';
+            return;
+        }
+
+        let allMsgs = JSON.parse(localStorage.getItem('cinetrack_global_messages')) || [];
+
+        list.innerHTML = users.map(u => {
+            const unreadCount = allMsgs.filter(m => m.sender === u.handle && m.receiver === this.currentUser && !m.read).length;
+            const chatHistory = allMsgs.filter(m => (m.sender === u.handle && m.receiver === this.currentUser) || (m.sender === this.currentUser && m.receiver === u.handle));
+            const lastMsg = chatHistory[chatHistory.length - 1];
+            
+            let lastMsgText = 'Yeni sohbet başlat';
+            if (lastMsg) {
+                lastMsgText = (lastMsg.sender === this.currentUser ? 'Sen: ' : '') + lastMsg.text;
+            }
+
+            return `
+            <div class="user-card" onclick="App.openOtherProfile('${u.handle}')" style="flex-direction:column; align-items:flex-start; position:relative;">
+                ${unreadCount > 0 ? `<div style="position:absolute; top:-6px; right:-6px; background:var(--red); color:white; font-size:12px; font-weight:bold; width:22px; height:22px; border-radius:50%; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 5px rgba(0,0,0,0.3); z-index:2;">${unreadCount > 9 ? '9+' : unreadCount}</div>` : ''}
+                <div style="display:flex; align-items:center; gap:12px; width:100%;">
+                    <div class="user-avatar">${u.avatar || '👨'}</div>
+                    <div class="user-info">
+                        <span class="user-name">${u.name}</span>
+                        <span class="user-handle">@${u.handle}</span>
+                    </div>
+                </div>
+                <div style="font-size:12px; color:var(--text3); margin-top:8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; width:100%;">
+                    ${lastMsgText}
+                </div>
+            </div>
+        `}).join('');
+    },
+
+    updateUnreadBadges() {
+        if (!this.currentUser) return;
+        let allMsgs = JSON.parse(localStorage.getItem('cinetrack_global_messages')) || [];
+        const unreadCount = allMsgs.filter(m => m.receiver === this.currentUser && !m.read).length;
+        
+        const badge = document.getElementById('messageBadge');
+        if (badge) {
+            if (unreadCount > 0) {
+                badge.style.display = 'inline-flex';
+                badge.innerText = unreadCount > 9 ? '9+' : unreadCount;
+                badge.style.position = 'absolute';
+                badge.style.top = '2px';
+                badge.style.right = '2px';
+                badge.style.background = 'var(--red)';
+                badge.style.color = 'white';
+                badge.style.fontSize = '10px';
+                badge.style.fontWeight = 'bold';
+                badge.style.width = '18px';
+                badge.style.height = '18px';
+                badge.style.borderRadius = '50%';
+                badge.style.display = 'flex';
+                badge.style.alignItems = 'center';
+                badge.style.justifyContent = 'center';
+            } else {
+                badge.style.display = 'none';
+            }
+        }
+    },
+
+    openOtherProfile(handle) {
+        const user = this.state.globalUsers.find(u => u.handle === handle);
+        if (!user) return;
+
+        // Fetch their stats
+        const theirMovies = JSON.parse(localStorage.getItem(`cinetrack_${handle}_movies`)) || [];
+        const theirSeries = JSON.parse(localStorage.getItem(`cinetrack_${handle}_series`)) || [];
+
+        document.getElementById('otherProfileAvatar').innerText = user.avatar || '👨';
+        document.getElementById('otherProfileName').innerText = user.name;
+        document.getElementById('otherProfileHandle').innerText = '@' + user.handle;
+
+        document.getElementById('otherStatMovies').innerText = theirMovies.filter(m => m.status === 'watched').length;
+        document.getElementById('otherStatSeries').innerText = theirSeries.length;
+
+        const msgBtn = document.getElementById('otherProfileMsgBtn');
+        msgBtn.onclick = () => {
+            this.closeModals();
+            this.openChat(handle);
+        };
+
+        document.getElementById('otherProfileModal').classList.add('open');
+    },
+
+    openChat(handle) {
+        const user = this.state.globalUsers.find(u => u.handle === handle);
+        if (!user) return;
+
+        this.currentChatHandle = handle;
+        document.getElementById('chatHeaderAvatar').innerText = user.avatar || '👨';
+        document.getElementById('chatHeaderName').innerText = user.name;
+        document.getElementById('chatHeaderHandle').innerText = '@' + user.handle;
+
+        // Mark messages as read
+        let allMsgs = JSON.parse(localStorage.getItem('cinetrack_global_messages')) || [];
+        let updated = false;
+        allMsgs.forEach(m => {
+            if (m.sender === handle && m.receiver === this.currentUser && !m.read) {
+                m.read = true;
+                updated = true;
+            }
+        });
+        if (updated) {
+            localStorage.setItem('cinetrack_global_messages', JSON.stringify(allMsgs));
+            this.updateUnreadBadges();
+            if (this.currentTab === 'social') this.renderSocialTab();
+        }
+
+        this.renderMessages();
+        document.getElementById('chatModal').classList.add('open');
+        setTimeout(() => document.getElementById('chatInput').focus(), 100);
+    },
+
+    renderMessages() {
+        if (!this.currentChatHandle) return;
+        const msgContainer = document.getElementById('chatMessages');
+        
+        let allMsgs = JSON.parse(localStorage.getItem('cinetrack_global_messages')) || [];
+        
+        // Filter messages between me and them
+        let chatHistory = allMsgs.filter(m => 
+            (m.sender === this.currentUser && m.receiver === this.currentChatHandle) ||
+            (m.sender === this.currentChatHandle && m.receiver === this.currentUser)
+        );
+
+        if (chatHistory.length === 0) {
+            msgContainer.innerHTML = '<div style="text-align:center; color:var(--text3); font-size:13px; margin-top:20px;">İlk mesajı gönder...</div>';
+            return;
+        }
+
+        msgContainer.innerHTML = chatHistory.map(m => {
+            const isMe = m.sender === this.currentUser;
+            const time = new Date(m.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            return `
+                <div class="message-bubble ${isMe ? 'sent' : 'received'}">
+                    ${m.text}
+                    <span class="message-time">${time}</span>
+                </div>
+            `;
+        }).join('');
+
+        // Scroll to bottom
+        msgContainer.scrollTop = msgContainer.scrollHeight;
+    },
+
+    sendMessage() {
+        if (!this.currentChatHandle) return;
+        const input = document.getElementById('chatInput');
+        const text = input.value.trim();
+        if (!text) return;
+
+        let allMsgs = JSON.parse(localStorage.getItem('cinetrack_global_messages')) || [];
+        allMsgs.push({
+            sender: this.currentUser,
+            receiver: this.currentChatHandle,
+            text: text,
+            timestamp: Date.now(),
+            read: false
+        });
+
+        localStorage.setItem('cinetrack_global_messages', JSON.stringify(allMsgs));
+        input.value = '';
+        this.renderMessages();
+        if (this.currentTab === 'social') this.renderSocialTab();
     }
 };
 
