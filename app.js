@@ -9,7 +9,9 @@ const App = {
         series: [],
         goal: 5,
         goalCurrent: 0,
-        goalWeek: ''
+        goalWeek: '',
+        streak: 0,
+        lastWatchDate: null
     },
     
     currentTab: 'dashboard',
@@ -63,6 +65,8 @@ const App = {
             this.state.goal = parseInt(localStorage.getItem('cinetrack_goal')) || 5;
             this.state.goalCurrent = parseInt(localStorage.getItem('cinetrack_goal_current')) || 0;
             this.state.goalWeek = localStorage.getItem('cinetrack_goal_week') || getStartOfWeek();
+            this.state.streak = parseInt(localStorage.getItem('cinetrack_streak')) || 0;
+            this.state.lastWatchDate = localStorage.getItem('cinetrack_lastWatchDate') || null;
             
             localStorage.setItem('cinetrack_migrated', 'true');
             this.save();
@@ -72,6 +76,8 @@ const App = {
             this.state.goal = parseInt(localStorage.getItem(`cinetrack_${this.currentUser}_goal`)) || 5;
             this.state.goalCurrent = parseInt(localStorage.getItem(`cinetrack_${this.currentUser}_goal_current`)) || 0;
             this.state.goalWeek = localStorage.getItem(`cinetrack_${this.currentUser}_goal_week`) || getStartOfWeek();
+            this.state.streak = parseInt(localStorage.getItem(`cinetrack_${this.currentUser}_streak`)) || 0;
+            this.state.lastWatchDate = localStorage.getItem(`cinetrack_${this.currentUser}_lastWatchDate`) || null;
         }
 
         checkGoalWeek();
@@ -170,6 +176,8 @@ const App = {
         localStorage.setItem(`cinetrack_${this.currentUser}_goal`, this.state.goal);
         localStorage.setItem(`cinetrack_${this.currentUser}_goal_current`, this.state.goalCurrent);
         localStorage.setItem(`cinetrack_${this.currentUser}_goal_week`, this.state.goalWeek);
+        localStorage.setItem(`cinetrack_${this.currentUser}_streak`, this.state.streak);
+        if(this.state.lastWatchDate) localStorage.setItem(`cinetrack_${this.currentUser}_lastWatchDate`, this.state.lastWatchDate);
     },
 
     bindEvents() {
@@ -336,6 +344,15 @@ const App = {
         // Detail Modals
         document.getElementById('movieDetailCloseBtn').addEventListener('click', () => this.closeModals());
         document.getElementById('seriesDetailCloseBtn').addEventListener('click', () => this.closeModals());
+
+        // V1.4 New Modals & Actions
+        if(document.getElementById('shareCloseBtn')) document.getElementById('shareCloseBtn').addEventListener('click', () => this.closeModals());
+        if(document.getElementById('wrappedCloseBtn')) document.getElementById('wrappedCloseBtn').addEventListener('click', () => this.closeModals());
+        if(document.getElementById('friendListCloseBtn')) document.getElementById('friendListCloseBtn').addEventListener('click', () => this.closeModals());
+        if(document.getElementById('btnWrapped')) document.getElementById('btnWrapped').addEventListener('click', () => this.showWrapped());
+        if(document.getElementById('btnFriendList')) document.getElementById('btnFriendList').addEventListener('click', () => this.openFriendList());
+        if(document.getElementById('findCommonBtn')) document.getElementById('findCommonBtn').addEventListener('click', () => this.findCommonMovies());
+        if(document.getElementById('movieShareBtn')) document.getElementById('movieShareBtn').addEventListener('click', () => this.openShareCard('movie'));
 
         // Detail Actions
         document.getElementById('movieDetailDeleteBtn').addEventListener('click', () => this.deleteItem('movie'));
@@ -506,6 +523,7 @@ const App = {
         document.getElementById('formGenre').value = '';
         document.getElementById('formPoster').value = '';
         document.getElementById('formNote').value = '';
+        document.getElementById('formPlatform').value = '';
         document.getElementById('formDuration').value = '';
         document.getElementById('formMovieStatus').value = 'watchlist';
         
@@ -535,6 +553,7 @@ const App = {
         document.getElementById('formGenre').value = item.genre || '';
         document.getElementById('formPoster').value = item.poster || '';
         document.getElementById('formNote').value = item.note || '';
+        document.getElementById('formPlatform').value = item.platform || '';
 
         if (type === 'movie') {
             document.getElementById('movieFields').classList.remove('hidden');
@@ -586,6 +605,7 @@ const App = {
             genre: document.getElementById('formGenre').value,
             poster: document.getElementById('formPoster').value,
             note: document.getElementById('formNote').value,
+            platform: document.getElementById('formPlatform').value,
             globalRating: document.getElementById('formGlobalRating').value,
             updatedAt: Date.now()
         };
@@ -700,6 +720,7 @@ const App = {
         const idx = arr.findIndex(x => x.id === id);
         if (idx > -1) {
             arr[idx].status = status;
+            if (status === 'watched' || status === 'completed' || status === 'watching') this.updateStreak();
             this.save();
             this.renderAll();
             this.showToast('Durum güncellendi');
@@ -822,6 +843,13 @@ const App = {
             `).join('');
         }
 
+        // Discover Carousel
+        const discoverWidget = document.getElementById('discoverWidget');
+        discoverWidget.classList.remove('hidden');
+        if (document.getElementById('discoverCarousel').innerHTML.includes('Yükleniyor')) {
+            this.loadDiscoverCarousel();
+        }
+
         // Goal
         document.getElementById('goalInput').value = this.state.goal;
         document.getElementById('goalTarget').innerText = this.state.goal;
@@ -833,8 +861,13 @@ const App = {
 
         const svgElement = document.querySelector('.goal-svg');
         const rankEl = document.getElementById('goalRank');
+        const streakEl = document.getElementById('goalStreak');
         const msgEl = document.getElementById('goalMessage');
         const emojiEl = document.getElementById('goalEmoji');
+        
+        if (streakEl) {
+            streakEl.innerText = `🔥 ${this.state.streak || 0} Günlük Seri`;
+        }
 
         if (goalPerc === 0) {
             rankEl.innerText = 'Başlangıç Çizgisi';
@@ -916,6 +949,7 @@ const App = {
                 
                 let globalBadge = m.globalRating ? `<div class="global-rating-badge">⭐ ${m.globalRating}</div>` : '';
                 let mustWatchBadge = m.rating >= 9 ? `<div class="must-watch-badge">✨ Başyapıt</div>` : '';
+                let platformBadge = this.getPlatformBadge(m.platform);
 
                 return `
                 <div class="movie-card" onclick="App.openMovieDetail('${m.id}')">
@@ -926,7 +960,7 @@ const App = {
                         ${badge}
                     </div>
                     <div class="movie-info">
-                        <div class="movie-title">${m.title}</div>
+                        <div class="movie-title">${m.title} ${platformBadge}</div>
                         <div class="movie-year">${m.year || ''} ${m.genre ? `• ${m.genre}` : ''}</div>
                         ${starHtml}
                     </div>
@@ -993,6 +1027,7 @@ const App = {
                 const starHtml = s.rating ? `<div class="series-rating" style="color:${starColor}">${'★'.repeat(s.rating)}<span style="color:var(--bg3)">${'★'.repeat(10-s.rating)}</span></div>` : '';
                 let globalBadge = s.globalRating ? `<div class="global-rating-badge">⭐ ${s.globalRating}</div>` : '';
                 let mustWatchBadge = s.rating >= 9 ? `<div class="must-watch-badge">✨ Başyapıt</div>` : '';
+                let platformBadge = this.getPlatformBadge(s.platform);
 
                 return `
                 <div class="series-card" onclick="App.openSeriesDetail('${s.id}')">
@@ -1003,7 +1038,7 @@ const App = {
                         ${statusTag}
                     </div>
                     <div class="series-meta">
-                        <div class="series-title">${s.title}</div>
+                        <div class="series-title">${s.title} ${platformBadge}</div>
                         <div class="series-year">${s.year || ''} ${s.genre ? `• ${s.genre}` : ''}</div>
                         ${starHtml}
                         <div class="series-prog-wrap">
@@ -1042,10 +1077,12 @@ const App = {
             </select>
         `;
 
+        let platformBadge = this.getPlatformBadge(m.platform);
+
         const body = `
             ${m.poster ? `<div class="detail-poster"><img src="${m.poster}" /></div>` : ''}
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                <h3 class="detail-title" style="margin:0;">${m.title}</h3>
+                <h3 class="detail-title" style="margin:0;">${m.title} ${platformBadge}</h3>
                 ${statusOptions}
             </div>
             <div class="detail-tags">
@@ -1103,10 +1140,12 @@ const App = {
             </select>
         `;
 
+        let platformBadge = this.getPlatformBadge(s.platform);
+
         const body = `
             ${s.poster ? `<div class="detail-poster"><img src="${s.poster}" /></div>` : ''}
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                <h3 class="detail-title" style="margin:0;">${s.title}</h3>
+                <h3 class="detail-title" style="margin:0;">${s.title} ${platformBadge}</h3>
                 ${statusOptions}
             </div>
             <div class="detail-tags">
@@ -1160,6 +1199,9 @@ const App = {
         if (s.watchedEps.length > 0 && s.status === 'watchlist') {
             s.status = 'watching';
         }
+        if (s.watchedEps.length > 0) {
+            this.updateStreak();
+        }
         if (s.watchedEps.length >= s.episodes) {
             if (s.status !== 'completed') {
                 s.status = 'completed';
@@ -1198,6 +1240,7 @@ const App = {
                     if (s.status === 'watchlist') {
                         s.status = 'watching';
                     }
+                    this.updateStreak();
                     if (s.watchedEps.length >= s.episodes && s.status !== 'completed') {
                         s.status = 'completed';
                         this.showToast('Tebrikler, dizi bitti! 🎉');
@@ -1218,6 +1261,249 @@ const App = {
             }
         } else {
             this.showToast('Tüm bölümler izlenmiş');
+        }
+    },
+
+    updateStreak() {
+        const todayStr = new Date().toDateString();
+        if (this.state.lastWatchDate === todayStr) {
+            return;
+        }
+        
+        let yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yesterdayStr = yesterday.toDateString();
+
+        if (this.state.lastWatchDate === yesterdayStr) {
+            this.state.streak++;
+        } else {
+            this.state.streak = 1;
+        }
+        
+        this.state.lastWatchDate = todayStr;
+        this.save();
+    },
+
+    getPlatformBadge(platform) {
+        if (!platform) return '';
+        switch(platform) {
+            case 'netflix': return '<span class="platform-icon platform-netflix" title="Netflix">N</span>';
+            case 'disney': return '<span class="platform-icon platform-disney" title="Disney+">+</span>';
+            case 'prime': return '<span class="platform-icon platform-prime" title="Prime">P</span>';
+            case 'mubi': return '<span class="platform-icon platform-mubi" title="Mubi">M</span>';
+            case 'blutv': return '<span class="platform-icon platform-blutv" title="BluTV">B</span>';
+            default: return '';
+        }
+    },
+
+    showWrapped() {
+        let totalHours = 0;
+        let genres = {};
+        let topRatedCount = 0;
+
+        this.state.movies.forEach(m => {
+            if (m.status === 'watched') {
+                totalHours += (parseInt(m.duration) || 100) / 60;
+                if (m.genre) {
+                    m.genre.split(',').forEach(g => {
+                        let tg = g.trim();
+                        if(tg) genres[tg] = (genres[tg] || 0) + 1;
+                    });
+                }
+            }
+            if (m.rating >= 9) topRatedCount++;
+        });
+
+        this.state.series.forEach(s => {
+            if (s.watchedEps) {
+                totalHours += (s.watchedEps.length * 45) / 60; // assume avg 45 min/ep
+            }
+            if (s.rating >= 9) topRatedCount++;
+            if (s.genre) {
+                s.genre.split(',').forEach(g => {
+                    let tg = g.trim();
+                    if(tg) genres[tg] = (genres[tg] || 0) + 1;
+                });
+            }
+        });
+
+        let topGenre = '?';
+        let maxG = 0;
+        for (let g in genres) {
+            if (genres[g] > maxG) {
+                maxG = genres[g];
+                topGenre = g;
+            }
+        }
+
+        document.getElementById('wrappedHours').innerText = Math.round(totalHours);
+        document.getElementById('wrappedGenre').innerText = topGenre;
+        document.getElementById('wrappedTop').innerText = topRatedCount;
+
+        document.getElementById('wrappedModal').classList.add('open');
+        
+        if (window.confetti) {
+            confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+        }
+    },
+
+    openFriendList() {
+        document.getElementById('friendNameInput').value = '';
+        document.getElementById('commonListResults').classList.add('hidden');
+        document.getElementById('friendListModal').classList.add('open');
+    },
+
+    findCommonMovies() {
+        const friendName = document.getElementById('friendNameInput').value.trim();
+        if(!friendName) return this.showToast('Lütfen bir isim gir', true);
+        
+        const listContainer = document.getElementById('commonListResults');
+        listContainer.classList.remove('hidden');
+        listContainer.innerHTML = '<div class="tmdb-loading">Eşleşmeler aranıyor...</div>';
+        
+        // Mock matching by randomly picking 3 items from user's list
+        setTimeout(() => {
+            let allItems = [...this.state.movies, ...this.state.series];
+            if(allItems.length === 0) {
+                listContainer.innerHTML = '<div class="empty-widget">Senin listende henüz içerik yok.</div>';
+                return;
+            }
+            allItems.sort(() => 0.5 - Math.random());
+            let commonItems = allItems.slice(0, Math.min(3, allItems.length));
+            
+            listContainer.innerHTML = commonItems.map(item => `
+                <div class="recent-item" onclick="document.getElementById('friendListModal').classList.remove('open'); App.${item.type === 'movie' ? 'openMovieDetail' : 'openSeriesDetail'}('${item.id}')">
+                    <div class="recent-type">${item.type === 'movie' ? '🎬' : '📺'}</div>
+                    <div class="recent-info">
+                        <div class="recent-title">${item.title}</div>
+                        <div class="recent-meta">${item.type === 'movie' ? 'Film' : 'Dizi'} • İkiniz de eklemişsiniz</div>
+                    </div>
+                </div>
+            `).join('');
+            
+        }, 1000);
+    },
+
+    openShareCard(type) {
+        document.getElementById('movieDetailModal').classList.remove('open');
+        document.getElementById('seriesDetailModal').classList.remove('open');
+        
+        const item = type === 'movie' 
+            ? this.state.movies.find(m => m.id === this.editingId)
+            : this.state.series.find(s => s.id === this.editingId);
+            
+        if (!item) return;
+
+        document.getElementById('shareCardTitle').innerText = item.title;
+        const posterEl = document.getElementById('shareCardPoster');
+        if(item.poster) {
+            posterEl.src = item.poster;
+            posterEl.style.display = 'block';
+            document.getElementById('shareCardBg').style.backgroundImage = `url('${item.poster}')`;
+        } else {
+            posterEl.style.display = 'none';
+            document.getElementById('shareCardBg').style.backgroundImage = 'none';
+        }
+        
+        const ratingStr = item.rating ? '⭐'.repeat(item.rating) : '👀 İzledim';
+        document.getElementById('shareCardRating').innerText = ratingStr;
+
+        document.getElementById('shareModal').classList.add('open');
+    },
+
+    getFavoriteGenreId() {
+        let genreCounts = {};
+        const allItems = [...this.state.movies, ...this.state.series];
+        allItems.forEach(item => {
+            if (item.genre) {
+                item.genre.split(',').forEach(g => {
+                    let tg = g.trim().toLowerCase();
+                    if(tg) genreCounts[tg] = (genreCounts[tg] || 0) + 1;
+                });
+            }
+        });
+        
+        let topGenre = null;
+        let max = 0;
+        for (let g in genreCounts) {
+            if (genreCounts[g] > max) {
+                max = genreCounts[g];
+                topGenre = g;
+            }
+        }
+        
+        if (!topGenre) return null;
+
+        const map = {
+            'aksiyon': 28, 'action': 28,
+            'macera': 12, 'adventure': 12,
+            'animasyon': 16, 'animation': 16,
+            'komedi': 35, 'comedy': 35,
+            'suç': 80, 'crime': 80,
+            'belgesel': 99, 'documentary': 99,
+            'dram': 18, 'drama': 18,
+            'aile': 10751, 'family': 10751,
+            'fantastik': 14, 'fantasy': 14,
+            'tarih': 36, 'history': 36,
+            'korku': 27, 'horror': 27,
+            'müzik': 10402, 'music': 10402,
+            'gizem': 9648, 'mystery': 9648,
+            'romantik': 10749, 'romance': 10749,
+            'bilim kurgu': 878, 'sci-fi': 878, 'science fiction': 878,
+            'gerilim': 53, 'thriller': 53,
+            'savaş': 10752, 'war': 10752
+        };
+        
+        return map[topGenre] || null;
+    },
+
+    async loadDiscoverCarousel() {
+        const carousel = document.getElementById('discoverCarousel');
+        carousel.innerHTML = '<div class="tmdb-loading">Yükleniyor...</div>';
+        try {
+            let url = '';
+            const genreId = this.getFavoriteGenreId();
+            const randomPage = Math.floor(Math.random() * 5) + 1; // Pick a random page from 1 to 5
+            
+            if (genreId) {
+                const mediaType = Math.random() > 0.5 ? 'movie' : 'tv';
+                url = `https://api.themoviedb.org/3/discover/${mediaType}?api_key=${TMDB_API_KEY}&language=tr-TR&with_genres=${genreId}&page=${randomPage}&sort_by=popularity.desc`;
+                const widgetTitle = document.querySelector('#discoverWidget .widget-title');
+                if (widgetTitle) widgetTitle.innerText = '🌟 Senin İçin Keşfet';
+            } else {
+                url = `https://api.themoviedb.org/3/trending/all/day?api_key=${TMDB_API_KEY}&language=tr-TR&page=${randomPage}`;
+                const widgetTitle = document.querySelector('#discoverWidget .widget-title');
+                if (widgetTitle) widgetTitle.innerText = '🌟 Keşfet (Popüler)';
+            }
+
+            const res = await fetch(url);
+            const data = await res.json();
+            
+            if(data.results && data.results.length > 0) {
+                // Shuffle the results array
+                let items = data.results.sort(() => 0.5 - Math.random());
+                
+                carousel.innerHTML = items.slice(0, 10).map(item => {
+                    const title = item.title || item.name;
+                    let type = item.media_type;
+                    if (!type) {
+                        type = url.includes('/discover/movie') ? 'movie' : 'series';
+                    } else {
+                        type = type === 'tv' ? 'series' : 'movie';
+                    }
+                    const poster = item.poster_path ? `https://image.tmdb.org/t/p/w200${item.poster_path}` : '';
+                    return `
+                        <div class="discover-item" onclick="App.openAddModal('${type}'); document.getElementById('formTitle').value='${title.replace(/'/g, "\\'")}'; document.getElementById('formTitle').dispatchEvent(new Event('input'));">
+                            <div class="discover-poster">${poster ? `<img src="${poster}" style="width:100%;height:100%;object-fit:cover;border-radius:12px;"/>` : '🎬'}</div>
+                            <div class="discover-title">${title}</div>
+                        </div>
+                    `;
+                }).join('');
+            } else {
+                carousel.innerHTML = '<div class="empty-widget">Öneri bulunamadı.</div>';
+            }
+        } catch(err) {
+            carousel.innerHTML = '<div class="empty-widget">Yüklenemedi.</div>';
         }
     }
 };

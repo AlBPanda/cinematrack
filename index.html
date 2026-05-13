@@ -141,7 +141,8 @@
               
               <div class="goal-text-content">
                 <div class="goal-rank" id="goalRank">Çaylak İzleyici</div>
-                <p class="goal-message" id="goalMessage">Haftaya yeni başladık, hadi biraz dizi!</p>
+                <div class="goal-streak" id="goalStreak" style="font-size: 12px; color: var(--amber); font-weight: bold; margin-top: 4px;">🔥 0 Günlük Seri</div>
+                <p class="goal-message" id="goalMessage" style="margin-top: 8px;">Haftaya yeni başladık, hadi biraz dizi!</p>
               </div>
             </div>
           </div>
@@ -150,6 +151,14 @@
             <h3 class="widget-title">▶️ Devam Et</h3>
             <div id="continueList" class="continue-list">
               <div class="empty-widget">Henüz dizi yok</div>
+            </div>
+          </div>
+
+          <!-- Discover Carousel (New) -->
+          <div class="widget discover-widget hidden" id="discoverWidget">
+            <h3 class="widget-title">🌟 Keşfet (Popüler)</h3>
+            <div class="discover-carousel" id="discoverCarousel">
+              <div class="tmdb-loading">Yükleniyor...</div>
             </div>
           </div>
 
@@ -269,6 +278,11 @@
           </div>
         </div>
 
+        <div class="profile-actions" style="display: flex; gap: 12px; margin-bottom: 24px;">
+          <button class="btn-primary" id="btnWrapped" style="flex:1; background: linear-gradient(135deg, #f59e0b, #ec4899);">🎉 2026 Özetini Gör</button>
+          <button class="btn-primary" id="btnFriendList" style="flex:1; background: linear-gradient(135deg, #3b82f6, #06b6d4);">🤝 Ortak Liste</button>
+        </div>
+
         <div class="theme-section">
           <h3 style="font-size: 15px; font-weight: 600; margin-bottom: 8px;">Tema Seçimi</h3>
           <p style="font-size: 13px; color: var(--text2); margin-bottom: 16px;">Uygulamanın görünümünü kendi zevkine göre özelleştir.</p>
@@ -359,6 +373,17 @@
           </div>
         </div>
         <div class="form-group">
+          <label>Platform (Nereden izleyeceksin?)</label>
+          <select id="formPlatform">
+            <option value="">Seçilmedi</option>
+            <option value="netflix">Netflix</option>
+            <option value="disney">Disney+</option>
+            <option value="prime">Amazon Prime</option>
+            <option value="mubi">Mubi</option>
+            <option value="blutv">BluTV</option>
+          </select>
+        </div>
+        <div class="form-group">
           <label>Poster URL (opsiyonel)</label>
           <input type="url" id="formPoster" placeholder="https://..." />
         </div>
@@ -437,8 +462,74 @@
         <button class="modal-close" id="movieDetailCloseBtn">✕</button>
       </div>
       <div class="modal-body" id="movieDetailBody"></div>
-      <div class="modal-footer">
-        <button class="btn-danger" id="movieDetailDeleteBtn" style="width:100%;">🗑️ Sil</button>
+      <div class="modal-footer" style="display:flex; gap:10px;">
+        <button class="btn-ghost" id="movieShareBtn" style="flex:1;">📸 Paylaş</button>
+        <button class="btn-danger" id="movieDetailDeleteBtn" style="flex:1;">🗑️ Sil</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Share Card Modal -->
+  <div class="modal-overlay" id="shareModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>İzleme Kartı</h2>
+        <button class="modal-close" id="shareCloseBtn">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="shareCardWrap" class="share-card-preview">
+          <div class="share-card-bg" id="shareCardBg"></div>
+          <div class="share-card-content">
+            <img src="" id="shareCardPoster" class="share-card-poster" />
+            <h3 id="shareCardTitle" class="share-card-title">Film Adı</h3>
+            <div id="shareCardRating" class="share-card-rating">⭐⭐⭐⭐⭐</div>
+            <div class="share-card-brand">CineTrack ile İzledim</div>
+          </div>
+        </div>
+        <p style="text-align:center; font-size:12px; color:var(--text3);">Bu kartın ekran görüntüsünü alıp sosyal medyada paylaşabilirsin!</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Wrapped Modal -->
+  <div class="modal-overlay" id="wrappedModal">
+    <div class="modal wrapped-modal">
+      <div class="modal-header">
+        <h2>CineTrack 2026 Özeti</h2>
+        <button class="modal-close" id="wrappedCloseBtn">✕</button>
+      </div>
+      <div class="modal-body" style="padding-bottom: 40px;">
+        <h3 style="font-size:24px; font-weight:800; margin-bottom: 24px;">Harika bir yıldı!</h3>
+        
+        <div class="wrapped-stat" id="wrappedHours">0</div>
+        <div class="wrapped-label">Saat İzledin</div>
+
+        <div class="wrapped-stat" id="wrappedGenre">?</div>
+        <div class="wrapped-label">En Sevdiğin Tür</div>
+
+        <div class="wrapped-stat" id="wrappedTop">0</div>
+        <div class="wrapped-label">Başyapıt Puanladın (9+)</div>
+        
+        <p style="font-size:14px; opacity:0.8; margin-top:20px;">2027'de daha fazla izlemek dileğiyle...</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Friend List Modal -->
+  <div class="modal-overlay" id="friendListModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Ortak Liste</h2>
+        <button class="modal-close" id="friendListCloseBtn">✕</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size: 13px; color: var(--text2); margin-bottom: 16px;">"Arkadaşımla ne izlesek?" derdine son! İkinizin de izleme listesinde olan yapımlar:</p>
+        <div class="form-group">
+          <input type="text" id="friendNameInput" placeholder="Arkadaşının adı (örn: Deniz)..." autocomplete="off" />
+        </div>
+        <button class="btn-primary" id="findCommonBtn" style="width:100%; margin-bottom: 20px;">Eşleşenleri Bul</button>
+        
+        <div id="commonListResults" class="content-list hidden"></div>
       </div>
     </div>
   </div>
