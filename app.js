@@ -1,6 +1,6 @@
 // app.js
 
-const OMDB_API_KEY = 'thewdb';
+const TMDB_API_KEY = '92b418e837b833be308bbfb1fb2aca1e';
 
 const App = {
     currentUser: null,
@@ -74,6 +74,58 @@ const App = {
             this.eventsBound = true;
         }
         this.renderAll();
+
+        // Easter Eggs Check
+        if (this.currentUser === 'deniz') {
+            this.triggerDenizEasterEgg();
+        } else if (this.currentUser === 'kermode') {
+            this.triggerKermodeAdmin();
+        } else {
+            document.documentElement.style.setProperty('--primary', '#6366f1');
+            document.documentElement.style.setProperty('--bg', '#0d0f14');
+        }
+    },
+
+    triggerDenizEasterEgg() {
+        document.documentElement.style.setProperty('--primary', '#00f2fe');
+        document.documentElement.style.setProperty('--bg', '#020b14');
+        
+        const audio = new Audio('https://actions.google.com/sounds/v1/cartoon/magic_chime.ogg');
+        audio.volume = 0.5;
+        audio.play().catch(e => console.log('Audio error:', e));
+
+        if (window.confetti) {
+            const duration = 3000;
+            const end = Date.now() + duration;
+
+            (function frame() {
+                confetti({
+                    particleCount: 5,
+                    angle: 60,
+                    spread: 55,
+                    origin: { x: 0 },
+                    colors: ['#00f2fe', '#4facfe', '#ffffff']
+                });
+                confetti({
+                    particleCount: 5,
+                    angle: 120,
+                    spread: 55,
+                    origin: { x: 1 },
+                    colors: ['#00f2fe', '#4facfe', '#ffffff']
+                });
+
+                if (Date.now() < end) {
+                    requestAnimationFrame(frame);
+                }
+            }());
+        }
+        
+        setTimeout(() => this.showToast('Deniz için özel efektler aktif! 🌊✨'), 1000);
+    },
+
+    triggerKermodeAdmin() {
+        document.body.classList.add('admin-mode');
+        setTimeout(() => this.showToast('Kermode Admin Modu Aktif 🛡️'), 1000);
     },
 
     logout() {
@@ -249,50 +301,33 @@ const App = {
         resultsContainer.innerHTML = '<div class="tmdb-loading">Aranıyor...</div>';
 
         const type = document.querySelector('.type-btn.active').dataset.type;
+        const endpoint = type === 'movie' ? 'movie' : 'tv';
+        const userLang = navigator.language || 'tr-TR';
 
         try {
-            if (type === 'movie') {
-                const res = await fetch(`https://www.omdbapi.com/?apikey=${OMDB_API_KEY}&s=${encodeURIComponent(query)}&type=movie`);
-                const data = await res.json();
-                
-                if (data.Search && data.Search.length > 0) {
-                    resultsContainer.innerHTML = data.Search.slice(0, 10).map(item => {
-                        const poster = item.Poster !== 'N/A' ? item.Poster : '';
-                        return `
-                            <div class="tmdb-item" onclick="App.selectTMDBItem('${item.imdbID}', 'movie')">
-                                <div class="tmdb-poster">${poster ? `<img src="${poster}" style="width:100%;height:100%;object-fit:cover;border-radius:6px;"/>` : '🎬'}</div>
-                                <div class="tmdb-info">
-                                    <div class="tmdb-title">${item.Title}</div>
-                                    <div class="tmdb-year">${item.Year}</div>
-                                </div>
+            const res = await fetch(`https://api.themoviedb.org/3/search/${endpoint}?api_key=${TMDB_API_KEY}&language=${userLang}&query=${encodeURIComponent(query)}`);
+            const data = await res.json();
+            
+            if (data.results && data.results.length > 0) {
+                resultsContainer.innerHTML = data.results.slice(0, 10).map(item => {
+                    const title = type === 'movie' ? item.title : item.name;
+                    const dateField = type === 'movie' ? item.release_date : item.first_air_date;
+                    const year = dateField ? dateField.split('-')[0] : '';
+                    const poster = item.poster_path ? `https://image.tmdb.org/t/p/w200${item.poster_path}` : '';
+                    const icon = type === 'movie' ? '🎬' : '📺';
+                    
+                    return `
+                        <div class="tmdb-item" onclick="App.selectTMDBItem('${item.id}', '${type}')">
+                            <div class="tmdb-poster">${poster ? `<img src="${poster}" style="width:100%;height:100%;object-fit:cover;border-radius:6px;"/>` : icon}</div>
+                            <div class="tmdb-info">
+                                <div class="tmdb-title">${title}</div>
+                                <div class="tmdb-year">${year}</div>
                             </div>
-                        `;
-                    }).join('');
-                } else {
-                    resultsContainer.innerHTML = '<div class="tmdb-loading">Sonuç bulunamadı.</div>';
-                }
+                        </div>
+                    `;
+                }).join('');
             } else {
-                const res = await fetch(`https://api.tvmaze.com/search/shows?q=${encodeURIComponent(query)}`);
-                const data = await res.json();
-                
-                if (data && data.length > 0) {
-                    resultsContainer.innerHTML = data.slice(0, 10).map(item => {
-                        const show = item.show;
-                        const poster = show.image && show.image.medium ? show.image.medium : '';
-                        const year = show.premiered ? show.premiered.split('-')[0] : '';
-                        return `
-                            <div class="tmdb-item" onclick="App.selectTMDBItem('${show.id}', 'series')">
-                                <div class="tmdb-poster">${poster ? `<img src="${poster}" style="width:100%;height:100%;object-fit:cover;border-radius:6px;"/>` : '📺'}</div>
-                                <div class="tmdb-info">
-                                    <div class="tmdb-title">${show.name}</div>
-                                    <div class="tmdb-year">${year}</div>
-                                </div>
-                            </div>
-                        `;
-                    }).join('');
-                } else {
-                    resultsContainer.innerHTML = '<div class="tmdb-loading">Sonuç bulunamadı.</div>';
-                }
+                resultsContainer.innerHTML = '<div class="tmdb-loading">Sonuç bulunamadı.</div>';
             }
         } catch (err) {
             resultsContainer.innerHTML = '<div class="tmdb-loading">Bir hata oluştu.</div>';
@@ -303,39 +338,30 @@ const App = {
         const resultsContainer = document.getElementById('tmdbResults');
         resultsContainer.innerHTML = '<div class="tmdb-loading">Detaylar alınıyor...</div>';
 
-        try {
-            if (type === 'movie') {
-                const res = await fetch(`https://www.omdbapi.com/?apikey=${OMDB_API_KEY}&i=${id}`);
-                const data = await res.json();
+        const endpoint = type === 'movie' ? 'movie' : 'tv';
+        const userLang = navigator.language || 'tr-TR';
 
-                document.getElementById('formTitle').value = data.Title || '';
-                document.getElementById('formYear').value = parseInt(data.Year) || '';
-                document.getElementById('formGenre').value = data.Genre !== 'N/A' ? data.Genre : '';
-                document.getElementById('formPoster').value = data.Poster !== 'N/A' ? data.Poster : '';
-                
-                const duration = parseInt(data.Runtime);
+        try {
+            const res = await fetch(`https://api.themoviedb.org/3/${endpoint}/${id}?api_key=${TMDB_API_KEY}&language=${userLang}`);
+            const data = await res.json();
+
+            const title = type === 'movie' ? data.title : data.name;
+            const dateField = type === 'movie' ? data.release_date : data.first_air_date;
+            const year = dateField ? parseInt(dateField.split('-')[0]) : '';
+            const genre = data.genres ? data.genres.map(g => g.name).join(', ') : '';
+            const poster = data.poster_path ? `https://image.tmdb.org/t/p/w500${data.poster_path}` : '';
+
+            document.getElementById('formTitle').value = title || '';
+            document.getElementById('formYear').value = year || '';
+            document.getElementById('formGenre').value = genre || '';
+            document.getElementById('formPoster').value = poster || '';
+            
+            if (type === 'movie') {
+                const duration = parseInt(data.runtime);
                 document.getElementById('formDuration').value = isNaN(duration) ? '' : duration;
             } else {
-                const res = await fetch(`https://api.tvmaze.com/shows/${id}?embed=episodes`);
-                const data = await res.json();
-
-                document.getElementById('formTitle').value = data.name || '';
-                document.getElementById('formYear').value = data.premiered ? parseInt(data.premiered.split('-')[0]) : '';
-                document.getElementById('formGenre').value = (data.genres || []).join(', ');
-                document.getElementById('formPoster').value = data.image && data.image.original ? data.image.original : '';
-                
-                let seasons = 1;
-                let episodes = 10;
-                if (data._embedded && data._embedded.episodes) {
-                    const eps = data._embedded.episodes;
-                    episodes = eps.length;
-                    if (eps.length > 0) {
-                        seasons = eps[eps.length - 1].season;
-                    }
-                }
-                
-                document.getElementById('formSeasons').value = seasons || 1;
-                document.getElementById('formEpisodes').value = episodes || 1;
+                document.getElementById('formSeasons').value = data.number_of_seasons || 1;
+                document.getElementById('formEpisodes').value = data.number_of_episodes || 10;
             }
 
             resultsContainer.classList.add('hidden');
