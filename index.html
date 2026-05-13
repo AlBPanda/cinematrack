@@ -83,12 +83,13 @@
     </header>
 
     <!-- Search Bar -->
-    <div class="search-bar-wrap" id="searchBarWrap">
+    <div class="search-bar-wrap" id="searchBarWrap" style="position: relative;">
       <div class="search-bar">
         <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
-        <input type="text" id="searchInput" placeholder="Film veya dizi ara..." />
+        <input type="text" id="searchInput" placeholder="Kütüphanede film veya dizi ara..." autocomplete="off" />
         <button class="search-clear" id="searchClearBtn">✕</button>
       </div>
+      <div id="globalSearchResults" class="tmdb-results hidden" style="position: absolute; top: 100%; left: 16px; right: 16px; z-index: 100; margin-top: 4px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 1px solid var(--border); border-radius: var(--radius-sm); max-height: 300px; overflow-y: auto;"></div>
     </div>
 
     <!-- Main Content -->
@@ -193,8 +194,11 @@
           <button class="filter-btn" data-filter="watchlist">İzlenecek</button>
           <button class="filter-btn" data-filter="watching">İzleniyor</button>
         </div>
-        <div class="sort-bar">
-          <select id="movieSort" class="sort-select">
+        <div class="sort-bar" style="display: flex; gap: 8px;">
+          <select id="movieGenreFilter" class="sort-select" style="flex:1;">
+            <option value="all">Tüm Türler</option>
+          </select>
+          <select id="movieSort" class="sort-select" style="flex:1;">
             <option value="added">Son Eklenen</option>
             <option value="rating">Puana Göre</option>
             <option value="title">Ada Göre</option>
@@ -219,8 +223,11 @@
           <button class="filter-btn" data-filter="paused">Duraksatıldı</button>
           <button class="filter-btn" data-filter="watchlist">İzlenecek</button>
         </div>
-        <div class="sort-bar">
-          <select id="seriesSort" class="sort-select">
+        <div class="sort-bar" style="display: flex; gap: 8px;">
+          <select id="seriesGenreFilter" class="sort-select" style="flex:1;">
+            <option value="all">Tüm Türler</option>
+          </select>
+          <select id="seriesSort" class="sort-select" style="flex:1;">
             <option value="added">Son Eklenen</option>
             <option value="title">Ada Göre</option>
             <option value="progress">İlerlemeye Göre</option>
@@ -271,20 +278,15 @@
 
       <div class="modal-body">
         <!-- TMDB Search -->
-        <div class="form-group" id="tmdbWrap">
-          <label>İnternetten Otomatik Bul (TMDB)</label>
+        <!-- Common Fields -->
+        <input type="hidden" id="formGlobalRating" value="" />
+        <div class="form-group" style="position: relative;">
+          <label>Başlık * <small style="color:var(--text3); font-weight:normal;">(Yazarken otomatik aranır)</small></label>
           <div class="tmdb-search-row">
             <svg class="tmdb-search-icon" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
-            <input type="text" id="tmdbInput" placeholder="Film/Dizi adı yazın..." autocomplete="off" />
+            <input type="text" id="formTitle" placeholder="Film/Dizi adı yazın..." autocomplete="off" />
           </div>
-          <div id="tmdbResults" class="tmdb-results hidden"></div>
-        </div>
-        <div class="modal-divider"></div>
-
-        <!-- Common Fields -->
-        <div class="form-group">
-          <label>Başlık *</label>
-          <input type="text" id="formTitle" placeholder="Film/Dizi adı" />
+          <div id="tmdbResults" class="tmdb-results hidden" style="position: absolute; top: 100%; left: 0; right: 0; z-index: 10; margin-top: 4px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 1px solid var(--purple);"></div>
         </div>
         <div class="form-row">
           <div class="form-group">
@@ -314,22 +316,6 @@
               <option value="watching">İzleniyor</option>
               <option value="watched">İzlendi</option>
             </select>
-          </div>
-          <div class="form-group" id="ratingGroup">
-            <label>Puan (1-10)</label>
-            <div class="star-rating" id="starRating">
-              <span class="star" data-val="1">★</span>
-              <span class="star" data-val="2">★</span>
-              <span class="star" data-val="3">★</span>
-              <span class="star" data-val="4">★</span>
-              <span class="star" data-val="5">★</span>
-              <span class="star" data-val="6">★</span>
-              <span class="star" data-val="7">★</span>
-              <span class="star" data-val="8">★</span>
-              <span class="star" data-val="9">★</span>
-              <span class="star" data-val="10">★</span>
-            </div>
-            <span class="rating-display" id="ratingDisplay">Puan seç</span>
           </div>
           <div class="form-group">
             <label>Süre (dk)</label>
@@ -378,8 +364,7 @@
       </div>
       <div class="modal-body" id="seriesDetailBody"></div>
       <div class="modal-footer">
-        <button class="btn-ghost" id="seriesDetailEditBtn">✏️ Düzenle</button>
-        <button class="btn-danger" id="seriesDetailDeleteBtn">🗑️ Sil</button>
+        <button class="btn-danger" id="seriesDetailDeleteBtn" style="width:100%;">🗑️ Sil</button>
       </div>
     </div>
   </div>
@@ -393,8 +378,7 @@
       </div>
       <div class="modal-body" id="movieDetailBody"></div>
       <div class="modal-footer">
-        <button class="btn-ghost" id="movieDetailEditBtn">✏️ Düzenle</button>
-        <button class="btn-danger" id="movieDetailDeleteBtn">🗑️ Sil</button>
+        <button class="btn-danger" id="movieDetailDeleteBtn" style="width:100%;">🗑️ Sil</button>
       </div>
     </div>
   </div>

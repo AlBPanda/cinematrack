@@ -162,13 +162,61 @@ const App = {
         });
         document.getElementById('searchClearBtn').addEventListener('click', () => {
             document.getElementById('searchInput').value = '';
+            document.getElementById('globalSearchResults').classList.add('hidden');
             this.renderMovies();
             this.renderSeries();
         });
-        document.getElementById('searchInput').addEventListener('input', () => {
-            if (this.currentTab === 'dashboard') {
-                this.switchTab('movies');
+        document.getElementById('searchInput').addEventListener('input', (e) => {
+            const query = e.target.value.trim().toLocaleLowerCase('tr');
+            const resContainer = document.getElementById('globalSearchResults');
+            
+            if (query.length < 2) {
+                resContainer.classList.add('hidden');
+                this.renderMovies();
+                this.renderSeries();
+                return;
             }
+
+            // Global Search Results
+            const matchedMovies = this.state.movies.filter(m => m.title.toLocaleLowerCase('tr').includes(query));
+            const matchedSeries = this.state.series.filter(s => s.title.toLocaleLowerCase('tr').includes(query));
+            
+            let html = '';
+            
+            matchedMovies.forEach(m => {
+                const poster = m.poster ? `<img src="${m.poster}" style="width:100%;height:100%;object-fit:cover;border-radius:6px;"/>` : '🎬';
+                html += `
+                    <div class="tmdb-item" onclick="document.getElementById('globalSearchResults').classList.add('hidden'); App.openMovieDetail('${m.id}')">
+                        <div class="tmdb-poster">${poster}</div>
+                        <div class="tmdb-info">
+                            <div class="tmdb-title">${m.title}</div>
+                            <div class="tmdb-year">🎬 Film ${m.year ? '- '+m.year : ''}</div>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            matchedSeries.forEach(s => {
+                const poster = s.poster ? `<img src="${s.poster}" style="width:100%;height:100%;object-fit:cover;border-radius:6px;"/>` : '📺';
+                html += `
+                    <div class="tmdb-item" onclick="document.getElementById('globalSearchResults').classList.add('hidden'); App.openSeriesDetail('${s.id}')">
+                        <div class="tmdb-poster">${poster}</div>
+                        <div class="tmdb-info">
+                            <div class="tmdb-title">${s.title}</div>
+                            <div class="tmdb-year">📺 Dizi ${s.year ? '- '+s.year : ''}</div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            if (html === '') {
+                html = '<div class="tmdb-loading">Sonuç bulunamadı.</div>';
+            }
+            
+            resContainer.innerHTML = html;
+            resContainer.classList.remove('hidden');
+
+            // Render current tabs as well
             this.renderMovies();
             this.renderSeries();
         });
@@ -200,7 +248,36 @@ const App = {
                     document.getElementById('movieFields').classList.add('hidden');
                     document.getElementById('seriesFields').classList.remove('hidden');
                 }
+                
+                // Re-trigger TMDB search with the new type
+                const currentTitle = document.getElementById('formTitle').value.trim();
+                if (currentTitle.length >= 2) {
+                    this.searchTMDB(currentTitle);
+                }
             });
+        });
+
+        // Close dropdowns when clicking outside
+        document.addEventListener('click', (e) => {
+            const tmdbResults = document.getElementById('tmdbResults');
+            const formTitle = document.getElementById('formTitle');
+            if (tmdbResults && !tmdbResults.contains(e.target) && e.target !== formTitle) {
+                tmdbResults.classList.add('hidden');
+            }
+
+            const globalResults = document.getElementById('globalSearchResults');
+            const searchInput = document.getElementById('searchInput');
+            if (globalResults && !globalResults.contains(e.target) && e.target !== searchInput) {
+                globalResults.classList.add('hidden');
+            }
+        });
+
+        // Re-show TMDB results when clicking back into formTitle
+        document.getElementById('formTitle').addEventListener('focus', (e) => {
+            const val = e.target.value.trim();
+            if (val.length >= 2 && document.getElementById('tmdbResults').innerHTML !== '') {
+                document.getElementById('tmdbResults').classList.remove('hidden');
+            }
         });
 
         // Star Rating
@@ -211,9 +288,9 @@ const App = {
             });
         });
 
-        // TMDB Search (Real-time)
+        // TMDB Search (Real-time) on formTitle
         let tmdbTimeout = null;
-        document.getElementById('tmdbInput').addEventListener('input', (e) => {
+        document.getElementById('formTitle').addEventListener('input', (e) => {
             clearTimeout(tmdbTimeout);
             const val = e.target.value.trim();
             if (val.length < 2) {
@@ -231,9 +308,7 @@ const App = {
         document.getElementById('seriesDetailCloseBtn').addEventListener('click', () => this.closeModals());
 
         // Detail Actions
-        document.getElementById('movieDetailEditBtn').addEventListener('click', () => this.openEditModal('movie'));
         document.getElementById('movieDetailDeleteBtn').addEventListener('click', () => this.deleteItem('movie'));
-        document.getElementById('seriesDetailEditBtn').addEventListener('click', () => this.openEditModal('series'));
         document.getElementById('seriesDetailDeleteBtn').addEventListener('click', () => this.deleteItem('series'));
 
         // Filters
@@ -252,9 +327,13 @@ const App = {
             });
         });
 
-        // Sorts
+        // Sorts & Genre Filters
         document.getElementById('movieSort').addEventListener('change', () => this.renderMovies());
         document.getElementById('seriesSort').addEventListener('change', () => this.renderSeries());
+        const mgf = document.getElementById('movieGenreFilter');
+        if (mgf) mgf.addEventListener('change', () => this.renderMovies());
+        const sgf = document.getElementById('seriesGenreFilter');
+        if (sgf) sgf.addEventListener('change', () => this.renderSeries());
 
         // Goal Setting
         document.getElementById('goalSetBtn').addEventListener('click', () => {
@@ -281,17 +360,7 @@ const App = {
         if (tab === 'series') this.renderSeries();
     },
 
-    setStarRating(val) {
-        document.querySelectorAll('.star').forEach(star => {
-            if (parseInt(star.dataset.val) <= val) {
-                star.classList.add('active');
-            } else {
-                star.classList.remove('active');
-            }
-        });
-        document.getElementById('ratingDisplay').innerText = val > 0 ? `${val} / 10` : 'Puan seç';
-        document.getElementById('starRating').dataset.rating = val;
-    },
+    // Star rating was removed from the add modal
 
     async searchTMDB(query) {
         if (!query) return;
@@ -356,6 +425,9 @@ const App = {
             document.getElementById('formGenre').value = genre || '';
             document.getElementById('formPoster').value = poster || '';
             
+            const voteAvg = data.vote_average ? data.vote_average.toFixed(1) : '';
+            document.getElementById('formGlobalRating').value = voteAvg;
+            
             if (type === 'movie') {
                 const duration = parseInt(data.runtime);
                 document.getElementById('formDuration').value = isNaN(duration) ? '' : duration;
@@ -365,7 +437,6 @@ const App = {
             }
 
             resultsContainer.classList.add('hidden');
-            document.getElementById('tmdbInput').value = '';
             this.showToast('Bilgiler otomatik dolduruldu!');
 
         } catch (err) {
@@ -378,8 +449,6 @@ const App = {
         this.editingType = null;
         document.getElementById('modalTitle').innerText = 'Yeni Ekle';
         document.getElementById('typeSelectorWrap').classList.remove('hidden');
-        document.getElementById('tmdbWrap').classList.remove('hidden');
-        document.getElementById('tmdbInput').value = '';
         document.getElementById('tmdbResults').classList.add('hidden');
         
         // Reset form
@@ -389,7 +458,6 @@ const App = {
         document.getElementById('formPoster').value = '';
         document.getElementById('formNote').value = '';
         document.getElementById('formDuration').value = '';
-        this.setStarRating(0);
         document.getElementById('formMovieStatus').value = 'watchlist';
         
         document.getElementById('formSeriesStatus').value = 'watching';
@@ -411,7 +479,7 @@ const App = {
         this.editingType = type;
         document.getElementById('modalTitle').innerText = 'Düzenle';
         document.getElementById('typeSelectorWrap').classList.add('hidden'); // Hide type switcher
-        document.getElementById('tmdbWrap').classList.add('hidden'); // Hide TMDB search on edit
+        document.getElementById('tmdbResults').classList.add('hidden');
         
         document.getElementById('formTitle').value = item.title;
         document.getElementById('formYear').value = item.year || '';
@@ -424,7 +492,6 @@ const App = {
             document.getElementById('seriesFields').classList.add('hidden');
             document.getElementById('formMovieStatus').value = item.status;
             document.getElementById('formDuration').value = item.duration || '';
-            this.setStarRating(item.rating || 0);
         } else {
             document.getElementById('movieFields').classList.add('hidden');
             document.getElementById('seriesFields').classList.remove('hidden');
@@ -458,18 +525,20 @@ const App = {
             genre: document.getElementById('formGenre').value,
             poster: document.getElementById('formPoster').value,
             note: document.getElementById('formNote').value,
+            globalRating: document.getElementById('formGlobalRating').value,
             updatedAt: Date.now()
         };
 
         if (type === 'movie') {
             const status = document.getElementById('formMovieStatus').value;
-            const rating = parseInt(document.getElementById('starRating').dataset.rating) || 0;
             const duration = document.getElementById('formDuration').value;
+            const existing = isEdit ? this.state.movies.find(m => m.id === this.editingId) : null;
 
             const newItem = {
                 ...baseItem,
                 type: 'movie',
-                status, rating, duration
+                status, duration,
+                rating: existing ? existing.rating : 0
             };
 
             if (isEdit) {
@@ -486,11 +555,13 @@ const App = {
             const status = document.getElementById('formSeriesStatus').value;
             const seasons = parseInt(document.getElementById('formSeasons').value) || 1;
             const episodes = parseInt(document.getElementById('formEpisodes').value) || 1;
+            const existing = isEdit ? this.state.series.find(s => s.id === this.editingId) : null;
 
             const newItem = {
                 ...baseItem,
                 type: 'series',
-                status, seasons, episodes
+                status, seasons, episodes,
+                rating: existing ? existing.rating : 0
             };
 
             if (isEdit) {
@@ -543,11 +614,69 @@ const App = {
         setTimeout(() => toast.classList.remove('show'), 3000);
     },
 
+    getRatingColor(rating) {
+        if (!rating) return 'var(--text3)';
+        if (rating >= 9) return '#00f2fe';
+        if (rating >= 7) return '#10b981';
+        if (rating >= 5) return '#f59e0b';
+        return '#ef4444';
+    },
+
+    quickRate(id, type, rating) {
+        const arr = type === 'movie' ? this.state.movies : this.state.series;
+        const idx = arr.findIndex(x => x.id === id);
+        if (idx > -1) {
+            arr[idx].rating = rating;
+            this.save();
+            this.renderAll();
+            if (type === 'movie') this.openMovieDetail(id);
+            else this.openSeriesDetail(id);
+        }
+    },
+
+    quickStatus(id, type, status) {
+        const arr = type === 'movie' ? this.state.movies : this.state.series;
+        const idx = arr.findIndex(x => x.id === id);
+        if (idx > -1) {
+            arr[idx].status = status;
+            this.save();
+            this.renderAll();
+            this.showToast('Durum güncellendi');
+        }
+    },
+
     renderAll() {
         this.updateBadges();
+        this.updateGenreDropdowns();
         this.renderDashboard();
         this.renderMovies();
         this.renderSeries();
+    },
+
+    updateGenreDropdowns() {
+        const movieGenres = new Set();
+        this.state.movies.forEach(m => {
+            if (m.genre) m.genre.split(',').forEach(g => movieGenres.add(g.trim()));
+        });
+        const mSelect = document.getElementById('movieGenreFilter');
+        if (mSelect) {
+            const currentMVal = mSelect.value;
+            mSelect.innerHTML = `<option value="all">Tüm Türler</option>` + 
+                Array.from(movieGenres).sort().map(g => `<option value="${g}">${g}</option>`).join('');
+            if (Array.from(movieGenres).includes(currentMVal)) mSelect.value = currentMVal;
+        }
+
+        const seriesGenres = new Set();
+        this.state.series.forEach(s => {
+            if (s.genre) s.genre.split(',').forEach(g => seriesGenres.add(g.trim()));
+        });
+        const sSelect = document.getElementById('seriesGenreFilter');
+        if (sSelect) {
+            const currentSVal = sSelect.value;
+            sSelect.innerHTML = `<option value="all">Tüm Türler</option>` + 
+                Array.from(seriesGenres).sort().map(g => `<option value="${g}">${g}</option>`).join('');
+            if (Array.from(seriesGenres).includes(currentSVal)) sSelect.value = currentSVal;
+        }
     },
 
     updateBadges() {
@@ -645,14 +774,16 @@ const App = {
 
     renderMovies() {
         const grid = document.getElementById('movieGrid');
-        const search = document.getElementById('searchInput').value.toLowerCase();
+        const search = document.getElementById('searchInput').value.trim().toLocaleLowerCase('tr');
         const filterBtn = document.querySelector('#tab-movies .filter-btn.active');
         const filter = filterBtn ? filterBtn.dataset.filter : 'all';
         const sort = document.getElementById('movieSort').value;
+        const genreFilter = document.getElementById('movieGenreFilter') ? document.getElementById('movieGenreFilter').value : 'all';
 
         let filtered = this.state.movies.filter(m => {
-            if (search && !m.title.toLowerCase().includes(search)) return false;
+            if (search && !m.title.toLocaleLowerCase('tr').includes(search)) return false;
             if (filter !== 'all' && m.status !== filter) return false;
+            if (genreFilter !== 'all' && (!m.genre || !m.genre.split(',').map(g=>g.trim()).includes(genreFilter))) return false;
             return true;
         });
 
@@ -683,16 +814,24 @@ const App = {
                 else if (m.status === 'watchlist') badge = '<div class="movie-status-badge badge-watchlist">İzlenecek</div>';
                 else if (m.status === 'watching') badge = '<div class="movie-status-badge badge-watching">İzleniyor</div>';
 
+                const starColor = this.getRatingColor(m.rating);
+                const starHtml = m.rating ? `<div class="movie-rating" style="color:${starColor}">${'★'.repeat(m.rating)}<span style="color:var(--bg3)">${'★'.repeat(10-m.rating)}</span></div>` : '';
+                
+                let globalBadge = m.globalRating ? `<div class="global-rating-badge">⭐ ${m.globalRating}</div>` : '';
+                let mustWatchBadge = m.rating >= 9 ? `<div class="must-watch-badge">✨ Başyapıt</div>` : '';
+
                 return `
                 <div class="movie-card" onclick="App.openMovieDetail('${m.id}')">
                     <div class="movie-poster">
                         ${m.poster ? `<img src="${m.poster}" loading="lazy" />` : `<div class="movie-poster-placeholder">🎬</div>`}
+                        ${globalBadge}
+                        ${mustWatchBadge}
                         ${badge}
                     </div>
                     <div class="movie-info">
                         <div class="movie-title">${m.title}</div>
                         <div class="movie-year">${m.year || ''} ${m.genre ? `• ${m.genre}` : ''}</div>
-                        ${m.rating ? `<div class="movie-rating">${'★'.repeat(m.rating)}</div>` : ''}
+                        ${starHtml}
                     </div>
                 </div>
                 `;
@@ -702,14 +841,16 @@ const App = {
 
     renderSeries() {
         const list = document.getElementById('seriesList');
-        const search = document.getElementById('searchInput').value.toLowerCase();
+        const search = document.getElementById('searchInput').value.trim().toLocaleLowerCase('tr');
         const filterBtn = document.querySelector('#tab-series .filter-btn.active');
         const filter = filterBtn ? filterBtn.dataset.filter : 'all';
         const sort = document.getElementById('seriesSort').value;
+        const genreFilter = document.getElementById('seriesGenreFilter') ? document.getElementById('seriesGenreFilter').value : 'all';
 
         let filtered = this.state.series.filter(s => {
-            if (search && !s.title.toLowerCase().includes(search)) return false;
+            if (search && !s.title.toLocaleLowerCase('tr').includes(search)) return false;
             if (filter !== 'all' && s.status !== filter) return false;
+            if (genreFilter !== 'all' && (!s.genre || !s.genre.split(',').map(g=>g.trim()).includes(genreFilter))) return false;
             return true;
         });
 
@@ -746,27 +887,33 @@ const App = {
                 else if (s.status === 'paused') statusTag = '<span class="series-status-tag status-paused">Durduruldu</span>';
                 else if (s.status === 'watchlist') statusTag = '<span class="series-status-tag status-watchlist">İzlenecek</span>';
 
+                const starColor = this.getRatingColor(s.rating);
+                const starHtml = s.rating ? `<div class="series-rating" style="color:${starColor}">${'★'.repeat(s.rating)}<span style="color:var(--bg3)">${'★'.repeat(10-s.rating)}</span></div>` : '';
+                let globalBadge = s.globalRating ? `<div class="global-rating-badge">⭐ ${s.globalRating}</div>` : '';
+                let mustWatchBadge = s.rating >= 9 ? `<div class="must-watch-badge">✨ Başyapıt</div>` : '';
+
                 return `
                 <div class="series-card" onclick="App.openSeriesDetail('${s.id}')">
-                    <div class="series-header">
-                        <div class="series-thumb">
-                            ${s.poster ? `<img src="${s.poster}" loading="lazy"/>` : '📺'}
+                    <div class="series-thumb">
+                        ${s.poster ? `<img src="${s.poster}" loading="lazy"/>` : '<div class="series-poster-placeholder">📺</div>'}
+                        ${globalBadge}
+                        ${mustWatchBadge}
+                        ${statusTag}
+                    </div>
+                    <div class="series-meta">
+                        <div class="series-title">${s.title}</div>
+                        <div class="series-info-row">
+                            ${s.year ? `<span class="series-tag">${s.year}</span>` : ''}
+                            ${s.genre ? `<span class="series-tag">${s.genre}</span>` : ''}
                         </div>
-                        <div class="series-meta">
-                            <div class="series-title">${s.title}</div>
-                            <div class="series-info-row">
-                                ${statusTag}
-                                ${s.year ? `<span class="series-tag">${s.year}</span>` : ''}
-                                ${s.genre ? `<span class="series-tag">${s.genre}</span>` : ''}
+                        ${starHtml}
+                        <div class="series-prog-wrap">
+                            <div class="series-prog-label">
+                                <span>İlerleme</span>
+                                <span>${watched} / ${total}</span>
                             </div>
-                            <div class="series-prog-wrap">
-                                <div class="series-prog-label">
-                                    <span>İlerleme</span>
-                                    <span>${watched} / ${total}</span>
-                                </div>
-                                <div class="series-prog">
-                                    <div class="series-prog-bar" style="width: ${perc}%"></div>
-                                </div>
+                            <div class="series-prog">
+                                <div class="series-prog-bar" style="width: ${perc}%"></div>
                             </div>
                         </div>
                     </div>
@@ -782,18 +929,32 @@ const App = {
         
         this.editingId = id;
         
-        let statusText = { watched: 'İzlendi', watchlist: 'İzlenecek', watching: 'İzleniyor' }[m.status];
-        
+        let starsInteractive = `<div class="interactive-stars" style="margin-top: 10px; display: flex; align-items: center; justify-content: center; gap: 4px;">`;
+        for (let i=1; i<=10; i++) {
+            starsInteractive += `<span style="font-size: 28px; cursor: pointer; transition: 0.2s; color: ${i <= (m.rating || 0) ? this.getRatingColor(m.rating) : 'var(--bg3)'}" onclick="event.stopPropagation(); App.quickRate('${m.id}', 'movie', ${i})">★</span>`;
+        }
+        starsInteractive += `</div>`;
+
+        const statusOptions = `
+            <select class="detail-status-select" onchange="App.quickStatus('${m.id}', 'movie', this.value)">
+                <option value="watchlist" ${m.status === 'watchlist' ? 'selected' : ''}>İzlenecek</option>
+                <option value="watching" ${m.status === 'watching' ? 'selected' : ''}>İzleniyor</option>
+                <option value="watched" ${m.status === 'watched' ? 'selected' : ''}>İzlendi</option>
+            </select>
+        `;
+
         const body = `
             ${m.poster ? `<div class="detail-poster"><img src="${m.poster}" /></div>` : ''}
-            <h3 class="detail-title">${m.title}</h3>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <h3 class="detail-title" style="margin:0;">${m.title}</h3>
+                ${statusOptions}
+            </div>
             <div class="detail-tags">
-                <span class="detail-tag">${statusText}</span>
                 ${m.year ? `<span class="detail-tag">${m.year}</span>` : ''}
                 ${m.duration ? `<span class="detail-tag">${m.duration} dk</span>` : ''}
                 ${m.genre ? `<span class="detail-tag">${m.genre}</span>` : ''}
             </div>
-            ${m.rating ? `<div class="detail-rating">${'★'.repeat(m.rating)}${'☆'.repeat(10 - m.rating)} <span style="font-size:12px;color:var(--text3)">${m.rating}/10</span></div>` : ''}
+            ${starsInteractive}
             ${m.note ? `<div class="detail-note">${m.note}</div>` : ''}
         `;
         
@@ -806,8 +967,6 @@ const App = {
         if (!s) return;
         
         this.editingId = id;
-        
-        let statusText = { watching: 'İzleniyor', completed: 'Tamamlandı', paused: 'Durduruldu', watchlist: 'İzlenecek' }[s.status];
         
         const epsPerSeason = Math.ceil(s.episodes / s.seasons);
         let seasonsHtml = '';
@@ -830,14 +989,32 @@ const App = {
             `;
         }
 
+        let starsInteractive = `<div class="interactive-stars" style="margin-top: 10px; display: flex; align-items: center; justify-content: center; gap: 4px;">`;
+        for (let i=1; i<=10; i++) {
+            starsInteractive += `<span style="font-size: 28px; cursor: pointer; transition: 0.2s; color: ${i <= (s.rating || 0) ? this.getRatingColor(s.rating) : 'var(--bg3)'}" onclick="event.stopPropagation(); App.quickRate('${s.id}', 'series', ${i})">★</span>`;
+        }
+        starsInteractive += `</div>`;
+
+        const statusOptions = `
+            <select class="detail-status-select" onchange="App.quickStatus('${s.id}', 'series', this.value)">
+                <option value="watchlist" ${s.status === 'watchlist' ? 'selected' : ''}>İzlenecek</option>
+                <option value="watching" ${s.status === 'watching' ? 'selected' : ''}>İzleniyor</option>
+                <option value="paused" ${s.status === 'paused' ? 'selected' : ''}>Durduruldu</option>
+                <option value="completed" ${s.status === 'completed' ? 'selected' : ''}>Tamamlandı</option>
+            </select>
+        `;
+
         const body = `
             ${s.poster ? `<div class="detail-poster"><img src="${s.poster}" /></div>` : ''}
-            <h3 class="detail-title">${s.title}</h3>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <h3 class="detail-title" style="margin:0;">${s.title}</h3>
+                ${statusOptions}
+            </div>
             <div class="detail-tags">
-                <span class="detail-tag">${statusText}</span>
                 ${s.year ? `<span class="detail-tag">${s.year}</span>` : ''}
                 ${s.genre ? `<span class="detail-tag">${s.genre}</span>` : ''}
             </div>
+            ${starsInteractive}
             ${s.note ? `<div class="detail-note">${s.note}</div>` : ''}
             <div class="detail-seasons">
                 <h3>Bölümler</h3>
@@ -856,22 +1033,34 @@ const App = {
         const s = this.state.series[idx];
         if (!s.watchedEps) s.watchedEps = [];
         
-        if (s.watchedEps.includes(epId)) {
-            s.watchedEps = s.watchedEps.filter(e => e !== epId);
-            btn.classList.remove('watched');
-            if (this.state.goalCurrent > 0) this.state.goalCurrent--;
+        const [seasonStr, epStr] = epId.split('-');
+        const season = parseInt(seasonStr);
+        const ep = parseInt(epStr);
+
+        let otherSeasonsEps = s.watchedEps.filter(e => !e.startsWith(`${season}-`));
+        let thisSeasonEps = s.watchedEps.filter(e => e.startsWith(`${season}-`)).map(e => parseInt(e.split('-')[1]));
+        
+        let maxWatched = thisSeasonEps.length > 0 ? Math.max(...thisSeasonEps) : 0;
+
+        let newThisSeason = [];
+        if (maxWatched === ep) {
+            // Unwatch this episode (and anything after, though there shouldn't be anything after)
+            for (let i = 1; i < ep; i++) {
+                newThisSeason.push(`${season}-${i}`);
+            }
         } else {
-            s.watchedEps.push(epId);
-            btn.classList.add('watched');
-            this.state.goalCurrent++;
-            this.showToast('Bölüm izlendi!');
+            // Watch up to this episode (handles both jumping forward and rewinding)
+            for (let i = 1; i <= ep; i++) {
+                newThisSeason.push(`${season}-${i}`);
+            }
         }
         
-        this.save();
-        this.renderDashboard();
+        s.watchedEps = [...otherSeasonsEps, ...newThisSeason];
         
-        // Re-render series list to update progress bars without closing modal
-        this.renderSeries();
+        this.save();
+        this.renderAll();
+        // Re-render modal to visually update buttons
+        this.openSeriesDetail(seriesId);
     },
 
     watchNextEp(seriesId) {
