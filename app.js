@@ -1,5 +1,22 @@
 // app.js
 
+const firebaseConfig = {
+  apiKey: "AIzaSyCrOIe74W8DK_yFL4iXApgKGJ0Yngwtoj8",
+  authDomain: "cinetrack-a6a6a.firebaseapp.com",
+  projectId: "cinetrack-a6a6a",
+  storageBucket: "cinetrack-a6a6a.firebasestorage.app",
+  messagingSenderId: "973119513848",
+  appId: "1:973119513848:web:683c8b6764d4843296c70d",
+  measurementId: "G-1M316LJ0K8"
+};
+
+// Initialize Firebase
+if (typeof firebase !== 'undefined') {
+  firebase.initializeApp(firebaseConfig);
+}
+const db = typeof firebase !== 'undefined' ? firebase.firestore() : null;
+const auth = typeof firebase !== 'undefined' ? firebase.auth() : null;
+
 const TMDB_API_KEY = '92b418e837b833be308bbfb1fb2aca1e';
 
 const App = {
@@ -20,151 +37,205 @@ const App = {
     editingId: null,
     editingType: null,
 
+    // Helper: convert handle to fake email for Firebase Auth
+    handleToEmail(handle) {
+        return `${handle}@cinetrack.app`;
+    },
+
+    setAuthLoading(loading, msg = 'Lütfen bekleyin...') {
+        const overlay = document.getElementById('authLoadingOverlay');
+        const text = document.getElementById('authLoadingText');
+        if (overlay) overlay.style.display = loading ? 'flex' : 'none';
+        if (text) text.innerText = msg;
+    },
+
     init() {
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('./sw.js').catch(err => console.log('SW fail', err));
         }
 
-        this.state.globalUsers = JSON.parse(localStorage.getItem('cinetrack_global_users')) || [];
+        // Toggle Passwords (always bind these regardless of auth state)
+        document.querySelectorAll('.toggle-password').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const targetId = e.currentTarget.dataset.target;
+                const input = document.getElementById(targetId);
+                if (input.type === 'password') {
+                    input.type = 'text';
+                    e.currentTarget.innerText = '🙈';
+                } else {
+                    input.type = 'password';
+                    e.currentTarget.innerText = '👁️';
+                }
+            });
+        });
 
-        const savedUser = localStorage.getItem('cinetrack_currentUser');
-        if (savedUser) {
-            this.login(savedUser);
-            setTimeout(() => {
-                document.getElementById('splash').classList.add('hidden');
-                document.getElementById('app').classList.remove('hidden');
-            }, 1500);
+        // Tab switch between login/register
+        if (document.getElementById('showRegisterBtn')) {
+            document.getElementById('showRegisterBtn').addEventListener('click', () => {
+                document.getElementById('loginCard').classList.add('hidden');
+                document.getElementById('registerCard').classList.remove('hidden');
+            });
+            document.getElementById('showLoginBtn').addEventListener('click', () => {
+                document.getElementById('registerCard').classList.add('hidden');
+                document.getElementById('loginCard').classList.remove('hidden');
+            });
+
+            document.querySelectorAll('.avatar-option').forEach(el => {
+                el.addEventListener('click', (e) => {
+                    document.querySelectorAll('.avatar-option').forEach(a => a.classList.remove('selected'));
+                    e.currentTarget.classList.add('selected');
+                });
+            });
+        }
+
+        // Handle suggestion (check Firestore for taken handles)
+        const handleInput = document.getElementById('regHandleInput');
+        const suggestionBox = document.getElementById('handleSuggestion');
+        if (handleInput && suggestionBox) {
+            handleInput.addEventListener('input', async (e) => {
+                const handle = e.target.value.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
+                if (!handle) { suggestionBox.style.display = 'none'; return; }
+                if (db) {
+                    const snap = await db.collection('users').doc(handle).get();
+                    if (snap.exists) {
+                        let num = 1;
+                        let suggested = `${handle}${num}`;
+                        // Simple increment suggestion (no deep loop for perf)
+                        suggestionBox.innerHTML = `Bu ad alınmış. Şunu dene: <span style="font-weight:bold; text-decoration:underline;">@${suggested}</span>`;
+                        suggestionBox.style.display = 'block';
+                        suggestionBox.onclick = () => { handleInput.value = suggested; suggestionBox.style.display = 'none'; };
+                    } else {
+                        suggestionBox.style.display = 'none';
+                    }
+                }
+            });
+        }
+
+        // LOGIN
+        document.getElementById('loginBtn').addEventListener('click', async () => {
+            const handle = document.getElementById('usernameInput').value.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
+            const password = document.getElementById('passwordInput').value.trim();
+            if (!handle || !password) return alert('Kullanıcı adı ve şifre gereklidir.');
+
+            this.setAuthLoading(true, 'Giriş yapılıyor...');
+            try {
+                await auth.signInWithEmailAndPassword(this.handleToEmail(handle), password);
+                // onAuthStateChanged will handle the rest
+            } catch (err) {
+                this.setAuthLoading(false);
+                if (err.code === 'auth/user-not-found') return alert('Kullanıcı bulunamadı. Lütfen kayıt olun.');
+                if (err.code === 'auth/wrong-password') return alert('Hatalı şifre.');
+                alert('Giriş hatası: ' + err.message);
+            }
+        });
+
+        // REGISTER
+        if (document.getElementById('registerBtn')) {
+            document.getElementById('registerBtn').addEventListener('click', async () => {
+                const name = document.getElementById('regNameInput').value.trim();
+                const handle = document.getElementById('regHandleInput').value.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
+                const password = document.getElementById('regPasswordInput').value.trim();
+                const avatarEl = document.querySelector('.avatar-option.selected');
+                const avatar = avatarEl ? avatarEl.innerText : '👤';
+
+                if (!name || !handle || !password) return alert('Ad, Kullanıcı Adı ve Şifre zorunludur.');
+                if (password.length < 6) return alert('Şifre en az 6 karakter olmalıdır.');
+
+                this.setAuthLoading(true, 'Hesap oluşturuluyor...');
+                try {
+                    // Check if handle is taken
+                    if (db) {
+                        const snap = await db.collection('users').doc(handle).get();
+                        if (snap.exists) {
+                            this.setAuthLoading(false);
+                            return alert('Bu kullanıcı adı alınmış.');
+                        }
+                    }
+
+                    const cred = await auth.createUserWithEmailAndPassword(this.handleToEmail(handle), password);
+
+                    // Save profile to Firestore
+                    const userProfile = { handle, name, avatar, createdAt: Date.now(), uid: cred.user.uid };
+                    if (db) {
+                        await db.collection('users').doc(handle).set(userProfile);
+                    }
+                    // onAuthStateChanged will handle the rest
+                } catch (err) {
+                    this.setAuthLoading(false);
+                    if (err.code === 'auth/email-already-in-use') return alert('Bu kullanıcı adı zaten alınmış.');
+                    alert('Kayıt hatası: ' + err.message);
+                }
+            });
+        }
+
+        // FIREBASE AUTH STATE OBSERVER
+        if (auth) {
+            auth.onAuthStateChanged(async (firebaseUser) => {
+                if (firebaseUser) {
+                    // Extract handle from email
+                    const handle = firebaseUser.email.replace('@cinetrack.app', '');
+                    await this.login(handle, firebaseUser);
+                    document.getElementById('splash').classList.add('hidden');
+                    document.getElementById('loginScreen').classList.add('hidden');
+                    document.getElementById('app').classList.remove('hidden');
+                    this.setAuthLoading(false);
+                } else {
+                    // Not logged in
+                    setTimeout(() => {
+                        document.getElementById('splash').classList.add('hidden');
+                        document.getElementById('loginScreen').classList.remove('hidden');
+                    }, 1500);
+                }
+            });
         } else {
+            // Fallback if Firebase not loaded
             setTimeout(() => {
                 document.getElementById('splash').classList.add('hidden');
                 document.getElementById('loginScreen').classList.remove('hidden');
             }, 1500);
-            // Toggle Passwords
-            document.querySelectorAll('.toggle-password').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    const targetId = e.currentTarget.dataset.target;
-                    const input = document.getElementById(targetId);
-                    if (input.type === 'password') {
-                        input.type = 'text';
-                        e.currentTarget.innerText = '🙈';
-                    } else {
-                        input.type = 'password';
-                        e.currentTarget.innerText = '👁️';
-                    }
-                });
-            });
-
-            // Handle suggestions
-            const handleInput = document.getElementById('regHandleInput');
-            const suggestionBox = document.getElementById('handleSuggestion');
-            
-            if (handleInput && suggestionBox) {
-                handleInput.addEventListener('input', (e) => {
-                    const handle = e.target.value.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
-                    if (!handle) {
-                        suggestionBox.style.display = 'none';
-                        return;
-                    }
-                    
-                    const exists = this.state.globalUsers.find(u => u.handle === handle);
-                    if (exists) {
-                        let num = 1;
-                        let suggestedHandle = `${handle}${num}`;
-                        while (this.state.globalUsers.find(u => u.handle === suggestedHandle)) {
-                            num++;
-                            suggestedHandle = `${handle}${num}`;
-                        }
-                        suggestionBox.innerHTML = `Bu ad alınmış. Şunu dene: <span style="font-weight:bold; text-decoration:underline;">@${suggestedHandle}</span>`;
-                        suggestionBox.style.display = 'block';
-                        suggestionBox.onclick = () => {
-                            handleInput.value = suggestedHandle;
-                            suggestionBox.style.display = 'none';
-                        };
-                    } else {
-                        suggestionBox.style.display = 'none';
-                    }
-                });
-            }
-            
-            document.getElementById('loginBtn').addEventListener('click', () => {
-                const handle = document.getElementById('usernameInput').value.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
-                const password = document.getElementById('passwordInput').value.trim();
-                
-                if (!handle || !password) return alert('Kullanıcı adı ve şifre gereklidir.');
-                
-                const user = this.state.globalUsers.find(u => u.handle === handle);
-                if (!user) return alert('Kullanıcı bulunamadı. Lütfen hesap oluşturun.');
-                
-                if (user.password) {
-                    if (user.password !== password) return alert('Hatalı şifre.');
-                } else {
-                    // Legacy account migration
-                    user.password = password;
-                    localStorage.setItem('cinetrack_global_users', JSON.stringify(this.state.globalUsers));
-                }
-
-                this.login(handle);
-                document.getElementById('loginScreen').classList.add('hidden');
-                document.getElementById('app').classList.remove('hidden');
-            });
-
-            if (document.getElementById('showRegisterBtn')) {
-                document.getElementById('showRegisterBtn').addEventListener('click', () => {
-                    document.getElementById('loginCard').classList.add('hidden');
-                    document.getElementById('registerCard').classList.remove('hidden');
-                });
-                document.getElementById('showLoginBtn').addEventListener('click', () => {
-                    document.getElementById('registerCard').classList.add('hidden');
-                    document.getElementById('loginCard').classList.remove('hidden');
-                });
-                
-                document.querySelectorAll('.avatar-option').forEach(el => {
-                    el.addEventListener('click', (e) => {
-                        document.querySelectorAll('.avatar-option').forEach(a => a.classList.remove('selected'));
-                        e.currentTarget.classList.add('selected');
-                    });
-                });
-
-                document.getElementById('registerBtn').addEventListener('click', () => {
-                    const name = document.getElementById('regNameInput').value.trim();
-                    const handle = document.getElementById('regHandleInput').value.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
-                    const password = document.getElementById('regPasswordInput').value.trim();
-                    const avatar = document.querySelector('.avatar-option.selected').innerText;
-                    
-                    if (!name || !handle || !password) return alert('Ad, Kullanıcı Adı ve Şifre zorunludur.');
-                    if (this.state.globalUsers.find(u => u.handle === handle)) return alert('Bu kullanıcı adı alınmış.');
-                    if (password.length < 6) return alert('Şifre en az 6 karakter olmalıdır.');
-                    
-                    const newUser = { handle, name, avatar, password, createdAt: Date.now() };
-                    this.state.globalUsers.push(newUser);
-                    localStorage.setItem('cinetrack_global_users', JSON.stringify(this.state.globalUsers));
-                    
-                    this.login(handle);
-                    document.getElementById('loginScreen').classList.add('hidden');
-                    document.getElementById('app').classList.remove('hidden');
-                });
-            }
         }
     },
 
-    login(username) {
-        this.currentUser = username.toLowerCase();
-        localStorage.setItem('cinetrack_currentUser', username);
-        
-        let userRecord = this.state.globalUsers.find(u => u.handle === this.currentUser);
-        if (!userRecord) {
-            userRecord = { handle: this.currentUser, name: username, avatar: '👨', createdAt: Date.now() };
-            this.state.globalUsers.push(userRecord);
-            localStorage.setItem('cinetrack_global_users', JSON.stringify(this.state.globalUsers));
-        }
-        this.state.currentUserData = userRecord;
+    async logout() {
+        if (auth) await auth.signOut();
+        this.currentUser = null;
+        this.state = { movies: [], series: [], goal: 5, goalCurrent: 0, goalWeek: '', streak: 0, lastWatchDate: null, globalUsers: [], currentUserData: null, following: [] };
+        this.eventsBound = false;
+        document.getElementById('app').classList.add('hidden');
+        document.getElementById('loginScreen').classList.remove('hidden');
+    },
 
-        document.getElementById('userNameDisplay').innerText = userRecord.name;
+    async login(username, firebaseUser = null) {
+        this.currentUser = username.toLowerCase();
+
+        // Load user profile from Firestore
+        if (db) {
+            try {
+                const snap = await db.collection('users').doc(this.currentUser).get();
+                if (snap.exists) {
+                    const data = snap.data();
+                    this.state.currentUserData = data;
+                    // Also push into globalUsers for social features
+                    if (!this.state.globalUsers.find(u => u.handle === this.currentUser)) {
+                        this.state.globalUsers.push(data);
+                    }
+                }
+
+                // Load all users for social tab
+                const allUsersSnap = await db.collection('users').get();
+                this.state.globalUsers = allUsersSnap.docs.map(d => d.data());
+            } catch (e) {
+                console.warn('Firestore user load error:', e);
+            }
+        }
+
+        const userRecord = this.state.currentUserData || { handle: this.currentUser, name: username, avatar: '👤' };
+
+        document.getElementById('userNameDisplay').innerText = userRecord.name || this.currentUser;
         
-        // Also update profile tab username
         const profileUserName = document.getElementById('profileUserNameFull');
         if (profileUserName) {
-            profileUserName.innerHTML = `${userRecord.name} <span style="font-size:14px; opacity:0.8; font-weight:normal;">@${userRecord.handle}</span>`;
+            profileUserName.innerHTML = `${userRecord.name || this.currentUser} <span style="font-size:14px; opacity:0.8; font-weight:normal;">@${userRecord.handle}</span>`;
         }
 
         // Easter Egg: 'deniz'
@@ -173,7 +244,7 @@ const App = {
             denizThemeBtn.style.display = this.currentUser === 'deniz' ? 'flex' : 'none';
         }
         
-        // Data Migration / Loading
+        // Data Migration / Loading (localStorage – will move to Firestore in Step 2)
         if (!localStorage.getItem('cinetrack_migrated') && localStorage.getItem('cinetrack_movies')) {
             this.state.movies = JSON.parse(localStorage.getItem('cinetrack_movies')) || [];
             this.state.series = JSON.parse(localStorage.getItem('cinetrack_series')) || [];
@@ -182,7 +253,6 @@ const App = {
             this.state.goalWeek = localStorage.getItem('cinetrack_goal_week') || getStartOfWeek();
             this.state.streak = parseInt(localStorage.getItem('cinetrack_streak')) || 0;
             this.state.lastWatchDate = localStorage.getItem('cinetrack_lastWatchDate') || null;
-            
             localStorage.setItem('cinetrack_migrated', 'true');
             this.save();
         } else {
@@ -195,7 +265,42 @@ const App = {
             this.state.lastWatchDate = localStorage.getItem(`cinetrack_${this.currentUser}_lastWatchDate`) || null;
         }
         
-        this.state.following = JSON.parse(localStorage.getItem(`cinetrack_${this.currentUser}_following`)) || [];
+        this.state.following = [];
+
+        // Load user data from Firestore
+        if (db) {
+            try {
+                const dataSnap = await db.collection('userData').doc(this.currentUser).get();
+                if (dataSnap.exists) {
+                    const d = dataSnap.data();
+                    this.state.movies      = d.movies       || [];
+                    this.state.series      = d.series       || [];
+                    this.state.goal        = d.goal         || 5;
+                    this.state.goalCurrent = d.goalCurrent  || 0;
+                    this.state.goalWeek    = d.goalWeek     || getStartOfWeek();
+                    this.state.streak      = d.streak       || 0;
+                    this.state.lastWatchDate = d.lastWatchDate || null;
+                    this.state.following   = d.following    || [];
+                } else {
+                    // First login — check for legacy localStorage data to migrate
+                    const legacyMovies = localStorage.getItem(`cinetrack_${this.currentUser}_movies`);
+                    if (legacyMovies) {
+                        this.state.movies      = JSON.parse(legacyMovies) || [];
+                        this.state.series      = JSON.parse(localStorage.getItem(`cinetrack_${this.currentUser}_series`)) || [];
+                        this.state.goal        = parseInt(localStorage.getItem(`cinetrack_${this.currentUser}_goal`)) || 5;
+                        this.state.goalCurrent = parseInt(localStorage.getItem(`cinetrack_${this.currentUser}_goal_current`)) || 0;
+                        this.state.goalWeek    = localStorage.getItem(`cinetrack_${this.currentUser}_goal_week`) || getStartOfWeek();
+                        this.state.streak      = parseInt(localStorage.getItem(`cinetrack_${this.currentUser}_streak`)) || 0;
+                        this.state.lastWatchDate = localStorage.getItem(`cinetrack_${this.currentUser}_lastWatchDate`) || null;
+                        this.state.following   = JSON.parse(localStorage.getItem(`cinetrack_${this.currentUser}_following`)) || [];
+                        this.save(); // push legacy data to Firestore immediately
+                        this.showToast('☁️ Veriler buluta taşındı!');
+                    }
+                }
+            } catch (e) {
+                console.warn('Firestore userData load error:', e);
+            }
+        }
 
         checkGoalWeek();
         if (!this.eventsBound) {
@@ -298,21 +403,32 @@ const App = {
         setTimeout(() => this.showToast('Kermode Admin Modu Aktif 🛡️'), 1000);
     },
 
-    logout() {
-        localStorage.removeItem('cinetrack_currentUser');
-        location.reload();
+    async logout() {
+        if (this.chatUnsubscribe) this.chatUnsubscribe();
+        if (auth) await auth.signOut();
+        this.currentUser = null;
+        this.state = { movies: [], series: [], goal: 5, goalCurrent: 0, goalWeek: '', streak: 0, lastWatchDate: null, globalUsers: [], currentUserData: null, following: [] };
+        this.eventsBound = false;
+        document.getElementById('app').classList.add('hidden');
+        document.getElementById('loginScreen').classList.remove('hidden');
     },
 
     save() {
         if (!this.currentUser) return;
-        localStorage.setItem(`cinetrack_${this.currentUser}_movies`, JSON.stringify(this.state.movies));
-        localStorage.setItem(`cinetrack_${this.currentUser}_series`, JSON.stringify(this.state.series));
-        localStorage.setItem(`cinetrack_${this.currentUser}_goal`, this.state.goal);
-        localStorage.setItem(`cinetrack_${this.currentUser}_goal_current`, this.state.goalCurrent);
-        localStorage.setItem(`cinetrack_${this.currentUser}_goal_week`, this.state.goalWeek);
-        localStorage.setItem(`cinetrack_${this.currentUser}_streak`, this.state.streak);
-        localStorage.setItem(`cinetrack_${this.currentUser}_following`, JSON.stringify(this.state.following));
-        if(this.state.lastWatchDate) localStorage.setItem(`cinetrack_${this.currentUser}_lastWatchDate`, this.state.lastWatchDate);
+        const payload = {
+            movies: this.state.movies,
+            series: this.state.series,
+            goal: this.state.goal,
+            goalCurrent: this.state.goalCurrent,
+            goalWeek: this.state.goalWeek,
+            streak: this.state.streak,
+            lastWatchDate: this.state.lastWatchDate || null,
+            following: this.state.following
+        };
+        if (db) {
+            db.collection('userData').doc(this.currentUser).set(payload, { merge: true })
+              .catch(e => console.warn('Firestore save error:', e));
+        }
     },
 
     bindEvents() {
@@ -1957,31 +2073,17 @@ const App = {
             return;
         }
 
-        let allMsgs = JSON.parse(localStorage.getItem('cinetrack_global_messages')) || [];
-
         list.innerHTML = users.map(u => {
-            const unreadCount = allMsgs.filter(m => m.sender === u.handle && m.receiver === this.currentUser && !m.read).length;
-            const chatHistory = allMsgs.filter(m => (m.sender === u.handle && m.receiver === this.currentUser) || (m.sender === this.currentUser && m.receiver === u.handle));
-            const lastMsg = chatHistory[chatHistory.length - 1];
-            
-            let lastMsgText = 'Yeni sohbet başlat';
-            if (lastMsg) {
-                lastMsgText = (lastMsg.sender === this.currentUser ? 'Sen: ' : '') + lastMsg.text;
-            }
-
             return `
             <div class="user-card" onclick="App.openOtherProfile('${u.handle}')" style="flex-direction:column; align-items:flex-start; position:relative; background:var(--bg2); padding:16px; border-radius:12px; border:1px solid var(--border); cursor:pointer;">
-                ${unreadCount > 0 ? `<div style="position:absolute; top:-6px; right:-6px; background:var(--red); color:white; font-size:12px; font-weight:bold; width:22px; height:22px; border-radius:50%; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 5px rgba(0,0,0,0.3); z-index:2;">${unreadCount > 9 ? '9+' : unreadCount}</div>` : ''}
                 <div style="display:flex; align-items:center; gap:12px; width:100%;">
-                    <div class="user-avatar" style="font-size:32px;">${u.avatar || '👨'}</div>
+                    <div class="user-avatar" style="font-size:32px;">${u.avatar || '👤'}</div>
                     <div class="user-info" style="display:flex; flex-direction:column; align-items:flex-start;">
                         <span class="user-name" style="font-size:14px; font-weight:700;">${u.name}</span>
                         <span class="user-handle" style="font-size:12px; color:var(--text2);">@${u.handle}</span>
                     </div>
                 </div>
-                <div style="font-size:12px; color:var(--text3); margin-top:8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; width:100%;">
-                    ${lastMsgText}
-                </div>
+                <div style="font-size:12px; color:var(--text3); margin-top:8px;">Mesaj göndermek için tıkla</div>
             </div>
             `;
         }).join('');
@@ -2170,13 +2272,22 @@ const App = {
         }
     },
 
-    openOtherProfile(handle) {
+    async openOtherProfile(handle) {
         const user = this.state.globalUsers.find(u => u.handle === handle);
         if (!user) return;
 
-        // Fetch their stats
-        const theirMovies = JSON.parse(localStorage.getItem(`cinetrack_${handle}_movies`)) || [];
-        const theirSeries = JSON.parse(localStorage.getItem(`cinetrack_${handle}_series`)) || [];
+        // Fetch their data from Firestore
+        let theirMovies = [];
+        let theirSeries = [];
+        if (db) {
+            try {
+                const snap = await db.collection('userData').doc(handle).get();
+                if (snap.exists) {
+                    theirMovies = snap.data().movies || [];
+                    theirSeries = snap.data().series || [];
+                }
+            } catch(e) { console.warn(e); }
+        }
 
         document.getElementById('otherProfileAvatar').innerText = user.avatar || '👨';
         document.getElementById('otherProfileName').innerText = user.name;
@@ -2232,24 +2343,9 @@ const App = {
         if (!user) return;
 
         this.currentChatHandle = handle;
-        document.getElementById('chatHeaderAvatar').innerText = user.avatar || '👨';
+        document.getElementById('chatHeaderAvatar').innerText = user.avatar || '👤';
         document.getElementById('chatHeaderName').innerText = user.name;
         document.getElementById('chatHeaderHandle').innerText = '@' + user.handle;
-
-        // Mark messages as read
-        let allMsgs = JSON.parse(localStorage.getItem('cinetrack_global_messages')) || [];
-        let updated = false;
-        allMsgs.forEach(m => {
-            if (m.sender === handle && m.receiver === this.currentUser && !m.read) {
-                m.read = true;
-                updated = true;
-            }
-        });
-        if (updated) {
-            localStorage.setItem('cinetrack_global_messages', JSON.stringify(allMsgs));
-            this.updateUnreadBadges();
-            if (this.currentTab === 'social') this.renderSocialTab();
-        }
 
         this.renderMessages();
         document.getElementById('chatModal').classList.add('open');
@@ -2259,69 +2355,145 @@ const App = {
     renderMessages() {
         if (!this.currentChatHandle) return;
         const msgContainer = document.getElementById('chatMessages');
-        
-        let allMsgs = JSON.parse(localStorage.getItem('cinetrack_global_messages')) || [];
-        
-        // Filter messages between me and them
-        let chatHistory = allMsgs.filter(m => 
-            (m.sender === this.currentUser && m.receiver === this.currentChatHandle) ||
-            (m.sender === this.currentChatHandle && m.receiver === this.currentUser)
-        );
 
-        if (chatHistory.length === 0) {
-            msgContainer.innerHTML = '<div style="text-align:center; color:var(--text3); font-size:13px; margin-top:20px;">İlk mesajı gönder...</div>';
+        if (!db) {
+            msgContainer.innerHTML = '<div style="text-align:center; color:var(--text3); font-size:13px;">Mesajlar için internet bağlantısı gereklidir.</div>';
             return;
         }
 
-        msgContainer.innerHTML = chatHistory.map(m => {
-            const isMe = m.sender === this.currentUser;
-            const time = new Date(m.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-            return `
-                <div class="message-bubble ${isMe ? 'sent' : 'received'}">
-                    ${m.text}
-                    <span class="message-time">${time}</span>
-                </div>
-            `;
-        }).join('');
+        // Unsubscribe previous listener
+        if (this.chatUnsubscribe) this.chatUnsubscribe();
 
-        // Scroll to bottom
-        msgContainer.scrollTop = msgContainer.scrollHeight;
+        const chatId = [this.currentUser, this.currentChatHandle].sort().join('_');
+
+        this.chatUnsubscribe = db.collection('messages').doc(chatId).collection('msgs')
+            .orderBy('timestamp', 'asc')
+            .onSnapshot(snap => {
+                const msgs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+                if (msgs.length === 0) {
+                    msgContainer.innerHTML = '<div style="text-align:center; color:var(--text3); font-size:13px; margin-top:20px;">İlk mesajı gönder...</div>';
+                    return;
+                }
+
+                msgContainer.innerHTML = msgs.map(m => {
+                    const isMe = m.sender === this.currentUser;
+                    // Handle both serverTimestamp (Firestore Timestamp object) and plain numbers
+                    const ts = m.timestamp && m.timestamp.toDate ? m.timestamp.toDate() : new Date(m.timestamp || 0);
+                    const time = ts.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                    return `
+                        <div class="message-bubble ${isMe ? 'sent' : 'received'}">
+                            ${m.text}
+                            <span class="message-time">${time}</span>
+                        </div>
+                    `;
+                }).join('');
+                msgContainer.scrollTop = msgContainer.scrollHeight;
+
+                // Mark incoming messages as read
+                snap.docs.forEach(doc => {
+                    const d = doc.data();
+                    if (d.receiver === this.currentUser && !d.read) {
+                        doc.ref.update({ read: true });
+                    }
+                });
+                this.updateUnreadBadges();
+            }, err => {
+                console.error('Chat listener error:', err);
+                msgContainer.innerHTML = `<div style="text-align:center; color:var(--red); font-size:13px; margin-top:20px;">❌ Bağlantı hatası: ${err.message}</div>`;
+            });
     },
 
-    sendMessage() {
+    async sendMessage() {
         if (!this.currentChatHandle) return;
         const input = document.getElementById('chatInput');
         const text = input.value.trim();
         if (!text) return;
-
-        let allMsgs = JSON.parse(localStorage.getItem('cinetrack_global_messages')) || [];
-        allMsgs.push({
-            sender: this.currentUser,
-            receiver: this.currentChatHandle,
-            text: text,
-            timestamp: Date.now(),
-            read: false
-        });
-
-        localStorage.setItem('cinetrack_global_messages', JSON.stringify(allMsgs));
         input.value = '';
-        this.renderMessages();
-        if (this.currentTab === 'social') this.renderSocialTab();
+
+        if (!db) return;
+
+        const chatId = [this.currentUser, this.currentChatHandle].sort().join('_');
+        try {
+            await db.collection('messages').doc(chatId).collection('msgs').add({
+                sender: this.currentUser,
+                receiver: this.currentChatHandle,
+                text: text,
+                timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                read: false
+            });
+        } catch(e) {
+            console.error('Mesaj gönderme hatası:', e);
+            this.showToast('❌ Mesaj gönderilemedi. Firestore kurallarını kontrol edin.');
+        }
     },
 
-    toggleFollow() {
-        if (!this.currentViewProfile) return;
-        const idx = this.state.following.indexOf(this.currentViewProfile);
-        if (idx > -1) {
-            this.state.following.splice(idx, 1);
-            this.showToast('Takipten çıkıldı');
-        } else {
-            this.state.following.push(this.currentViewProfile);
-            this.showToast('Takip ediliyor');
+    async updateUnreadBadges() {
+        if (!db || !this.currentUser) return;
+        // Count unread across all chats
+        const snap = await db.collectionGroup('msgs')
+            .where('receiver', '==', this.currentUser)
+            .where('read', '==', false)
+            .get().catch(() => null);
+        const count = snap ? snap.size : 0;
+
+        const badge = document.getElementById('socialUnreadBadge');
+        if (badge) {
+            badge.style.display = count > 0 ? 'flex' : 'none';
+            badge.innerText = count > 9 ? '9+' : count;
+            badge.style.position = 'absolute';
+            badge.style.top = '2px';
+            badge.style.right = '2px';
+            badge.style.background = 'var(--red)';
+            badge.style.color = 'white';
+            badge.style.fontSize = '10px';
+            badge.style.fontWeight = 'bold';
+            badge.style.width = '18px';
+            badge.style.height = '18px';
+            badge.style.borderRadius = '50%';
+            badge.style.display = count > 0 ? 'flex' : 'none';
+            badge.style.alignItems = 'center';
+            badge.style.justifyContent = 'center';
         }
-        this.save();
-        this.openOtherProfile(this.currentViewProfile);
-        this.renderProfileStats(); // update count
+    },
+
+    async toggleFollow() {
+        if (!this.currentViewProfile || !db) return;
+        const targetHandle = this.currentViewProfile;
+        const isFollowing = this.state.following.includes(targetHandle);
+
+        try {
+            if (isFollowing) {
+                // Unfollow: remove from my following, remove me from their followers
+                this.state.following = this.state.following.filter(h => h !== targetHandle);
+                await db.collection('userData').doc(this.currentUser).set(
+                    { following: firebase.firestore.FieldValue.arrayRemove(targetHandle) },
+                    { merge: true }
+                );
+                await db.collection('userData').doc(targetHandle).set(
+                    { followers: firebase.firestore.FieldValue.arrayRemove(this.currentUser) },
+                    { merge: true }
+                );
+                this.showToast('Takipten çıkıldı');
+            } else {
+                // Follow: add to my following, add me to their followers
+                this.state.following.push(targetHandle);
+                await db.collection('userData').doc(this.currentUser).set(
+                    { following: firebase.firestore.FieldValue.arrayUnion(targetHandle) },
+                    { merge: true }
+                );
+                await db.collection('userData').doc(targetHandle).set(
+                    { followers: firebase.firestore.FieldValue.arrayUnion(this.currentUser) },
+                    { merge: true }
+                );
+                this.showToast('Takip ediliyor ❤️');
+            }
+            this.openOtherProfile(targetHandle);
+            this.renderProfileStats();
+        } catch(e) {
+            console.error('Follow error:', e);
+            this.showToast('❌ Hata: ' + e.message);
+        }
     },
 
     toggleFavorite(type) {
@@ -2360,11 +2532,12 @@ const App = {
         }
     },
 
-    openFollowModal(type) {
+    async openFollowModal(type) {
         const title = document.getElementById('followModalTitle');
         const list = document.getElementById('followList');
-        list.innerHTML = '';
-        
+        list.innerHTML = '<div style="text-align:center; color:var(--text3); padding:20px;">Yükleniyor...</div>';
+        document.getElementById('followModal').classList.add('open');
+
         if (type === 'following') {
             title.innerText = 'Takip Ettiklerin';
             if (this.state.following.length === 0) {
@@ -2372,56 +2545,67 @@ const App = {
             } else {
                 list.innerHTML = this.state.following.map(handle => {
                     const u = this.state.globalUsers.find(x => x.handle === handle);
-                    if (!u) return '';
+                    if (!u) return `<div style="font-size:13px; color:var(--text3); padding:8px;">@${handle}</div>`;
                     return `
-                    <div class="user-card" onclick="App.closeModals(); App.openOtherProfile('${u.handle}')" style="background:var(--bg2); padding:12px; border-radius:8px; border:1px solid var(--border); margin-bottom:8px; cursor:pointer; display:flex; gap:12px; align-items:center;">
-                        <div style="font-size:24px;">${u.avatar || '👨'}</div>
+                    <div onclick="App.closeModals(); App.openOtherProfile('${u.handle}')" style="background:var(--bg2); padding:12px; border-radius:8px; border:1px solid var(--border); margin-bottom:8px; cursor:pointer; display:flex; gap:12px; align-items:center;">
+                        <div style="font-size:24px;">${u.avatar || '👤'}</div>
                         <div>
                             <div style="font-size:14px; font-weight:bold;">${u.name}</div>
                             <div style="font-size:12px; color:var(--text2);">@${u.handle}</div>
                         </div>
-                    </div>
-                    `;
+                    </div>`;
                 }).join('');
             }
         } else {
             title.innerText = 'Takipçilerin';
-            list.innerHTML = '<div class="empty-widget">Online özellikler aktifleştiğinde takipçilerin burada görünecek.</div>';
-        }
-        
-        document.getElementById('followModal').classList.add('open');
-    },
+            try {
+                if (!db) throw new Error('Firestore unavailable');
+                const snap = await db.collection('userData').doc(this.currentUser).get();
+                const followers = snap.exists ? (snap.data().followers || []) : [];
 
-    deleteAccount() {
-        if (!this.currentUser) return;
-        
-        const confirmDelete = confirm('Hesabınızı kalıcı olarak silmek istediğinize emin misiniz? Bu işlem geri alınamaz ve kullanıcı adınız başkaları tarafından alınabilir.');
-        if (!confirmDelete) return;
-
-        // Remove from global users
-        let users = JSON.parse(localStorage.getItem('cinetrack_global_users')) || [];
-        users = users.filter(u => u.handle !== this.currentUser);
-        localStorage.setItem('cinetrack_global_users', JSON.stringify(users));
-
-        // Remove all user specific items
-        const prefix = `cinetrack_${this.currentUser}_`;
-        const keysToRemove = [];
-        for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            if (key.startsWith(prefix)) {
-                keysToRemove.push(key);
+                if (followers.length === 0) {
+                    list.innerHTML = '<div class="empty-widget">Henüz takipçin yok.</div>';
+                } else {
+                    const userItems = await Promise.all(followers.map(async handle => {
+                        const uSnap = await db.collection('users').doc(handle).get();
+                        return uSnap.exists ? uSnap.data() : { handle, name: handle, avatar: '👤' };
+                    }));
+                    list.innerHTML = userItems.map(u => `
+                    <div onclick="App.closeModals(); App.openOtherProfile('${u.handle}')" style="background:var(--bg2); padding:12px; border-radius:8px; border:1px solid var(--border); margin-bottom:8px; cursor:pointer; display:flex; gap:12px; align-items:center;">
+                        <div style="font-size:24px;">${u.avatar || '👤'}</div>
+                        <div>
+                            <div style="font-size:14px; font-weight:bold;">${u.name}</div>
+                            <div style="font-size:12px; color:var(--text2);">@${u.handle}</div>
+                        </div>
+                    </div>`).join('');
+                }
+            } catch(e) {
+                list.innerHTML = '<div class="empty-widget">Takipçiler yüklenemedi.</div>';
             }
         }
+    },
+
+    async deleteAccount() {
+        if (!this.currentUser) return;
         
-        keysToRemove.forEach(key => localStorage.removeItem(key));
+        const confirmDelete = confirm('Hesabınızı kalıcı olarak silmek istediğinize emin misiniz? Bu işlem geri alınamaz.');
+        if (!confirmDelete) return;
 
-        // Clean up messages
-        let msgs = JSON.parse(localStorage.getItem('cinetrack_global_messages')) || [];
-        msgs = msgs.filter(m => m.sender !== this.currentUser && m.receiver !== this.currentUser);
-        localStorage.setItem('cinetrack_global_messages', JSON.stringify(msgs));
-
-        alert('Hesabınız başarıyla silindi.');
-        this.logout();
+        try {
+            if (db) {
+                // Delete Firestore user profile & data
+                await db.collection('users').doc(this.currentUser).delete();
+                await db.collection('userData').doc(this.currentUser).delete();
+            }
+            // Delete Firebase Auth account
+            if (auth && auth.currentUser) {
+                await auth.currentUser.delete();
+            }
+            alert('Hesabınız başarıyla silindi.');
+            await this.logout();
+        } catch(e) {
+            alert('Silme hatası: ' + e.message);
+        }
     }
 };
 
@@ -2433,10 +2617,13 @@ function getStartOfWeek() {
 }
 
 function checkGoalWeek() {
+    // Handled via Firestore data on load – goalWeek comparison done in save()
     const currentWeek = getStartOfWeek();
-    if (localStorage.getItem('cinetrack_goal_week') !== currentWeek) {
-        localStorage.setItem('cinetrack_goal_current', '0');
-        localStorage.setItem('cinetrack_goal_week', currentWeek);
+    if (App.state.goalWeek && App.state.goalWeek !== currentWeek) {
+        App.state.goalCurrent = 0;
+        App.state.goalWeek = currentWeek;
+    } else if (!App.state.goalWeek) {
+        App.state.goalWeek = currentWeek;
     }
 }
 
