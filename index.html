@@ -394,9 +394,17 @@
       <!-- Social Tab -->
       <section class="tab-content" id="tab-social">
         <header class="header" style="margin-bottom: 20px;">
-          <h1 class="header-title" style="font-size: 20px; font-weight:700;">💬 Mesajlar</h1>
-          <p class="header-subtitle" style="font-size:13px; color:var(--text2); margin-top:4px;">Arkadaşlarını bul, takip et ve mesajlaş</p>
+          <h1 class="header-title" style="font-size: 20px; font-weight:700;">💬 Topluluk & Mesajlar</h1>
+          <p class="header-subtitle" style="font-size:13px; color:var(--text2); margin-top:4px;">Arkadaşlarını bul, takip et, mesajlaş ve ortak izle</p>
         </header>
+
+        <!-- Follow Requests Section -->
+        <div id="followRequestsSection" style="display:none; margin-bottom: 20px; background: linear-gradient(135deg, rgba(245,158,11,0.08), rgba(239,68,68,0.08)); border: 1px solid rgba(245,158,11,0.2); border-radius: 16px; padding: 16px;">
+          <h3 style="font-size:13px; font-weight:700; color:var(--text); margin-bottom:12px; display:flex; align-items:center; gap:6px;">
+            🔔 Takip İstekleri (<span id="followRequestsCount">0</span>)
+          </h3>
+          <div id="followRequestsList" style="display:flex; flex-direction:column; gap:8px;"></div>
+        </div>
 
         <!-- User Search -->
         <div style="margin-bottom: 20px;">
@@ -406,6 +414,20 @@
           </div>
           <!-- Search Results -->
           <div id="userSearchResults" style="display:none; background:var(--bg2); border:1px solid var(--border); border-radius:12px; overflow:hidden; margin-bottom:12px;"></div>
+        </div>
+
+        <!-- Watch Party Widget -->
+        <div class="widget stats-widget" style="margin-bottom: 20px; background: linear-gradient(135deg, rgba(168,85,247,0.08), rgba(59,130,246,0.08)); border: 1px solid rgba(168,85,247,0.2);">
+          <h3 class="widget-title" style="display:flex; align-items:center; gap:8px; font-size:13px;">
+            🍿 Ortak İzleme Odaları
+          </h3>
+          <p style="font-size:12px; color:var(--text2); margin-bottom:12px;">Arkadaşlarınla senkronize film izle ve sohbet et!</p>
+          <div style="display:flex; gap:10px;">
+            <button class="btn-primary" id="btnCreateWatchParty" style="flex:1; padding:10px; font-size:12px;">Oda Oluştur</button>
+            <button class="btn-secondary" id="btnJoinWatchParty" style="flex:1; padding:10px; font-size:12px; background:var(--bg3); border:1px solid var(--border); border-radius:12px; color:var(--text); font-weight:600; cursor:pointer;">Odaya Katıl</button>
+          </div>
+          <!-- Active Parties List -->
+          <div id="activeWatchPartiesList" style="margin-top:12px; display:flex; flex-direction:column; gap:8px;"></div>
         </div>
 
         <!-- Conversations List -->

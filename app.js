@@ -261,6 +261,9 @@ const App = {
         }
         
         this.state.following = [];
+        this.state.followers = [];
+        this.state.followRequests = [];
+        this.state.sentRequests = [];
 
         // Load user data from Firestore
         if (db) {
@@ -276,6 +279,9 @@ const App = {
                     this.state.streak      = d.streak       || 0;
                     this.state.lastWatchDate = d.lastWatchDate || null;
                     this.state.following   = d.following    || [];
+                    this.state.followers   = d.followers    || [];
+                    this.state.followRequests = d.followRequests || [];
+                    this.state.sentRequests   = d.sentRequests   || [];
                 } else {
                     // First login — check for legacy localStorage data to migrate
                     const legacyMovies = localStorage.getItem(`cinetrack_${this.currentUser}_movies`);
@@ -288,10 +294,33 @@ const App = {
                         this.state.streak      = parseInt(localStorage.getItem(`cinetrack_${this.currentUser}_streak`)) || 0;
                         this.state.lastWatchDate = localStorage.getItem(`cinetrack_${this.currentUser}_lastWatchDate`) || null;
                         this.state.following   = JSON.parse(localStorage.getItem(`cinetrack_${this.currentUser}_following`)) || [];
-                        this.save(); // push legacy data to Firestore immediately
                         this.showToast('☁️ Veriler buluta taşındı!');
                     }
+                    this.save(); // push legacy or initial data to Firestore immediately
                 }
+
+                // Guarantee document existence and initialized flag
+                await db.collection('userData').doc(this.currentUser).set({ initialized: true }, { merge: true });
+
+                // Subscribe to live social list updates
+                if (this.userDataUnsubscribe) this.userDataUnsubscribe();
+                this.userDataUnsubscribe = db.collection('userData').doc(this.currentUser).onSnapshot(doc => {
+                    if (doc.exists) {
+                        const d = doc.data();
+                        this.state.following      = d.following      || [];
+                        this.state.followers      = d.followers      || [];
+                        this.state.followRequests = d.followRequests || [];
+                        this.state.sentRequests   = d.sentRequests   || [];
+
+                        this.renderFollowRequestsUI();
+                        if (this.currentTab === 'social') {
+                            this.renderConversationsList();
+                            const q = document.getElementById('socialSearchInput')?.value?.trim();
+                            if (q) this.renderUserSearch(q);
+                        }
+                        this.renderProfileStats();
+                    }
+                });
             } catch (e) {
                 console.warn('Firestore userData load error:', e);
             }
@@ -305,6 +334,7 @@ const App = {
         }
         this.renderAll();
         this.updateUnreadBadges();
+        this.renderFollowRequestsUI();
 
         // Easter Eggs Check
         if (this.currentUser === 'deniz') {
@@ -400,9 +430,11 @@ const App = {
 
     async logout() {
         if (this.chatUnsubscribe) this.chatUnsubscribe();
+        if (this.userDataUnsubscribe) this.userDataUnsubscribe();
+        if (this.watchPartyUnsubscribe) this.watchPartyUnsubscribe();
         if (auth) await auth.signOut();
         this.currentUser = null;
-        this.state = { movies: [], series: [], goal: 5, goalCurrent: 0, goalWeek: '', streak: 0, lastWatchDate: null, globalUsers: [], currentUserData: null, following: [] };
+        this.state = { movies: [], series: [], goal: 5, goalCurrent: 0, goalWeek: '', streak: 0, lastWatchDate: null, globalUsers: [], currentUserData: null, following: [], followers: [], followRequests: [], sentRequests: [] };
         this.eventsBound = false;
         document.getElementById('app').classList.add('hidden');
         document.getElementById('loginScreen').classList.remove('hidden');
@@ -639,6 +671,21 @@ const App = {
                 if (e.key === 'Enter') this.sendMessage();
             });
         }
+
+        // Watch Party Event Binding
+        if (document.getElementById('btnCreateWatchParty')) document.getElementById('btnCreateWatchParty').addEventListener('click', () => this.createWatchParty());
+        if (document.getElementById('btnJoinWatchParty')) document.getElementById('btnJoinWatchParty').addEventListener('click', () => this.joinWatchParty());
+        if (document.getElementById('watchPartyCloseBtn')) document.getElementById('watchPartyCloseBtn').addEventListener('click', () => {
+            document.getElementById('watchPartyModal').style.display = 'none';
+            if (this.watchPartyUnsubscribe) this.watchPartyUnsubscribe();
+            if (this.watchPartyChatUnsubscribe) this.watchPartyChatUnsubscribe();
+            this.currentWatchPartyId = null;
+        });
+        if (document.getElementById('btnSyncTimer')) document.getElementById('btnSyncTimer').addEventListener('click', () => this.toggleWatchPartyState());
+        if (document.getElementById('wpChatSendBtn')) document.getElementById('wpChatSendBtn').addEventListener('click', () => this.sendWatchPartyMessage());
+        if (document.getElementById('wpChatInput')) document.getElementById('wpChatInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') this.sendWatchPartyMessage();
+        });
 
         // Filters
         document.querySelectorAll('#tab-movies .filter-btn').forEach(btn => {
@@ -2069,6 +2116,85 @@ const App = {
     renderSocialTab(query = '') {
         this.renderAiSuggestion();
         this.renderConversationsList();
+        this.renderFollowRequestsUI();
+        this.renderActiveWatchParties();
+    },
+
+    renderFollowRequestsUI() {
+        const section = document.getElementById('followRequestsSection');
+        const countSpan = document.getElementById('followRequestsCount');
+        const list = document.getElementById('followRequestsList');
+        if (!section || !list) return;
+
+        const requests = this.state.followRequests || [];
+        if (requests.length === 0) {
+            section.style.display = 'none';
+            return;
+        }
+
+        section.style.display = 'block';
+        if (countSpan) countSpan.innerText = requests.length;
+
+        list.innerHTML = requests.map(handle => {
+            const u = this.state.globalUsers.find(x => x.handle === handle) || { handle, name: handle, avatar: '👤' };
+            return `
+            <div style="display:flex; align-items:center; gap:12px; background:var(--bg); padding:10px 14px; border-radius:12px; border:1px solid var(--border);">
+                <div style="font-size:24px;">${u.avatar || '👤'}</div>
+                <div style="flex:1; min-width:0;">
+                    <div style="font-size:13px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${u.name}</div>
+                    <div style="font-size:11px; color:var(--text2);">@${u.handle}</div>
+                </div>
+                <div style="display:flex; gap:6px;">
+                    <button onclick="App.acceptFollowRequest('${u.handle}')" style="padding:6px 12px; border-radius:8px; background:var(--primary); color:white; border:none; font-size:11px; font-weight:bold; cursor:pointer;">Onayla</button>
+                    <button onclick="App.rejectFollowRequest('${u.handle}')" style="padding:6px 12px; border-radius:8px; background:var(--bg3); color:var(--text); border:1px solid var(--border); font-size:11px; font-weight:bold; cursor:pointer;">Reddet</button>
+                </div>
+            </div>`;
+        }).join('');
+    },
+
+    async acceptFollowRequest(handle) {
+        if (!db || !this.currentUser) return;
+        try {
+            // Remove from my requests, add to my followers
+            this.state.followRequests = this.state.followRequests.filter(h => h !== handle);
+            if (!this.state.followers.includes(handle)) this.state.followers.push(handle);
+            
+            await db.collection('userData').doc(this.currentUser).set({
+                followRequests: firebase.firestore.FieldValue.arrayRemove(handle),
+                followers: firebase.firestore.FieldValue.arrayUnion(handle)
+            }, { merge: true });
+
+            // Add me to their following, remove me from their sentRequests
+            await db.collection('userData').doc(handle).set({
+                following: firebase.firestore.FieldValue.arrayUnion(this.currentUser),
+                sentRequests: firebase.firestore.FieldValue.arrayRemove(this.currentUser)
+            }, { merge: true });
+
+            this.showToast(`✅ @${handle} takip isteği onaylandı`);
+            this.renderFollowRequestsUI();
+            this.renderProfileStats();
+        } catch (e) {
+            this.showToast('❌ Onaylama hatası: ' + e.message);
+        }
+    },
+
+    async rejectFollowRequest(handle) {
+        if (!db || !this.currentUser) return;
+        try {
+            this.state.followRequests = this.state.followRequests.filter(h => h !== handle);
+            await db.collection('userData').doc(this.currentUser).set({
+                followRequests: firebase.firestore.FieldValue.arrayRemove(handle)
+            }, { merge: true });
+
+            await db.collection('userData').doc(handle).set({
+                sentRequests: firebase.firestore.FieldValue.arrayRemove(this.currentUser)
+            }, { merge: true });
+
+            this.showToast(`❌ @${handle} takip isteği reddedildi`);
+            this.renderFollowRequestsUI();
+        } catch (e) {
+            this.showToast('❌ Hata: ' + e.message);
+        }
     },
 
     renderUserSearch(query) {
@@ -2093,6 +2219,18 @@ const App = {
         resultsBox.style.display = 'block';
         resultsBox.innerHTML = users.slice(0, 8).map(u => {
             const isFollowing = this.state.following.includes(u.handle);
+            const isRequested = (this.state.sentRequests || []).includes(u.handle);
+
+            let btnText = 'Takip Et';
+            let btnStyle = 'border:1px solid var(--primary); background:var(--primary); color:white;';
+            if (isFollowing) {
+                btnText = 'Takip Ediliyor';
+                btnStyle = 'border:1px solid var(--border); background:transparent; color:var(--text2);';
+            } else if (isRequested) {
+                btnText = 'İstek Gönderildi';
+                btnStyle = 'border:1px solid var(--border); background:var(--bg3); color:var(--text);';
+            }
+
             return `
             <div style="display:flex; align-items:center; gap:12px; padding:12px 16px; border-bottom:1px solid var(--border); cursor:pointer;"
                  onmouseenter="this.style.background='var(--bg3)'" onmouseleave="this.style.background='transparent'">
@@ -2103,14 +2241,11 @@ const App = {
                 </div>
                 <div style="display:flex; gap:8px; flex-shrink:0;">
                     <button onclick="App.quickToggleFollow('${u.handle}'); event.stopPropagation();" 
-                        style="padding:6px 12px; border-radius:20px; border:1px solid ${isFollowing ? 'var(--border)' : 'var(--primary)'}; 
-                               background:${isFollowing ? 'transparent' : 'var(--primary)'}; color:${isFollowing ? 'var(--text2)' : 'white'};
-                               font-size:12px; font-weight:600; cursor:pointer; transition:all 0.2s;">
-                        ${isFollowing ? 'Takip Ediliyor' : 'Takip Et'}
+                        style="padding:6px 12px; border-radius:20px; font-size:11px; font-weight:600; cursor:pointer; transition:all 0.2s; ${btnStyle}">
+                        ${btnText}
                     </button>
-                    <button onclick="App.openChat('${u.handle}'); document.getElementById('userSearchResults').style.display='none'; document.getElementById('socialSearchInput').value=''; event.stopPropagation();"
-                        style="padding:6px 12px; border-radius:20px; border:1px solid var(--primary); background:transparent; color:var(--primary);
-                               font-size:12px; font-weight:600; cursor:pointer;">
+                    <button onclick="App.safeOpenChat('${u.handle}'); document.getElementById('userSearchResults').style.display='none'; document.getElementById('socialSearchInput').value=''; event.stopPropagation();"
+                        style="padding:6px 12px; border-radius:20px; border:1px solid var(--primary); background:transparent; color:var(--primary); font-size:11px; font-weight:600; cursor:pointer;">
                         Mesaj
                     </button>
                 </div>
@@ -2119,30 +2254,35 @@ const App = {
     },
 
     async quickToggleFollow(handle) {
-        // Follow/unfollow without opening profile modal
+        if (!db || !this.currentUser) return;
         const isFollowing = this.state.following.includes(handle);
+        const isRequested = (this.state.sentRequests || []).includes(handle);
+
         try {
+            // First guarantee target document exists by setting initialized flag safely
+            await db.collection('userData').doc(handle).set({ initialized: true }, { merge: true });
+
             if (isFollowing) {
+                // Unfollow directly
                 this.state.following = this.state.following.filter(h => h !== handle);
-                if (db) {
-                    await db.collection('userData').doc(this.currentUser).set(
-                        { following: firebase.firestore.FieldValue.arrayRemove(handle) }, { merge: true });
-                    await db.collection('userData').doc(handle).set(
-                        { followers: firebase.firestore.FieldValue.arrayRemove(this.currentUser) }, { merge: true });
-                }
+                await db.collection('userData').doc(this.currentUser).set({ following: firebase.firestore.FieldValue.arrayRemove(handle) }, { merge: true });
+                await db.collection('userData').doc(handle).set({ followers: firebase.firestore.FieldValue.arrayRemove(this.currentUser) }, { merge: true });
                 this.showToast('Takipten çıkıldı');
+            } else if (isRequested) {
+                // Cancel follow request
+                this.state.sentRequests = this.state.sentRequests.filter(h => h !== handle);
+                await db.collection('userData').doc(this.currentUser).set({ sentRequests: firebase.firestore.FieldValue.arrayRemove(handle) }, { merge: true });
+                await db.collection('userData').doc(handle).set({ followRequests: firebase.firestore.FieldValue.arrayRemove(this.currentUser) }, { merge: true });
+                this.showToast('Takip isteği iptal edildi');
             } else {
-                this.state.following.push(handle);
-                if (db) {
-                    await db.collection('userData').doc(this.currentUser).set(
-                        { following: firebase.firestore.FieldValue.arrayUnion(handle) }, { merge: true });
-                    await db.collection('userData').doc(handle).set(
-                        { followers: firebase.firestore.FieldValue.arrayUnion(this.currentUser) }, { merge: true });
-                }
-                this.showToast('Takip ediliyor ❤️');
+                // Send follow request
+                if (!this.state.sentRequests) this.state.sentRequests = [];
+                this.state.sentRequests.push(handle);
+                await db.collection('userData').doc(this.currentUser).set({ sentRequests: firebase.firestore.FieldValue.arrayUnion(handle) }, { merge: true });
+                await db.collection('userData').doc(handle).set({ followRequests: firebase.firestore.FieldValue.arrayUnion(this.currentUser) }, { merge: true });
+                this.showToast('📨 Takip isteği gönderildi');
             }
             this.renderProfileStats();
-            // Refresh search results
             const q = document.getElementById('socialSearchInput')?.value?.trim();
             if (q) this.renderUserSearch(q);
         } catch(e) {
@@ -2150,25 +2290,31 @@ const App = {
         }
     },
 
+    safeOpenChat(handle) {
+        // Enforce: only message people you follow (who accepted your request) or admins
+        if (this.currentUser !== 'kermode' && !this.state.following.includes(handle)) {
+            this.showToast('💬 Sadece takip ettiğiniz (takip isteğinizi onaylayan) kişilere mesaj gönderebilirsiniz.');
+            return;
+        }
+        this.openChat(handle);
+    },
+
     async renderConversationsList() {
         const list = document.getElementById('conversationsList');
         if (!list || !db || !this.currentUser) return;
 
-        // Build conversation list from following
-        const contacts = this.state.following;
-
+        const contacts = this.state.following || [];
         if (contacts.length === 0) {
             list.innerHTML = `
                 <div class="empty-widget" style="text-align:center; color:var(--text3); padding:32px 16px;">
                     <div style="font-size:36px; margin-bottom:8px;">💬</div>
-                    <div>Takip ettiğin biri yok. Yukarıdan birini bul!</div>
+                    <div>Takip ettiğin (istek onaylayan) biri yok. Yukarıdan birini bul!</div>
                 </div>`;
             return;
         }
 
         list.innerHTML = contacts.map(handle => {
-            const u = this.state.globalUsers.find(x => x.handle === handle);
-            if (!u) return '';
+            const u = this.state.globalUsers.find(x => x.handle === handle) || { handle, name: handle, avatar: '👤' };
             return `
             <div onclick="App.openChat('${u.handle}')" 
                  style="display:flex; align-items:center; gap:12px; padding:14px 16px; border-radius:12px;
@@ -2183,6 +2329,150 @@ const App = {
                 <div style="color:var(--primary); font-size:20px;">›</div>
             </div>`;
         }).join('');
+    },
+
+    // ==========================================
+    // WATCH PARTY INTEGRATION
+    // ==========================================
+
+    renderActiveWatchParties() {
+        const list = document.getElementById('activeWatchPartiesList');
+        if (!list || !db) return;
+
+        if (this.watchPartiesListUnsubscribe) return; // already listening
+
+        this.watchPartiesListUnsubscribe = db.collection('watchparties')
+            .orderBy('createdAt', 'desc').limit(5)
+            .onSnapshot(snap => {
+                if (snap.empty) {
+                    list.innerHTML = '<div style="font-size:11px; color:var(--text3); text-align:center;">Şu an aktif oda yok. İlk oluşturan sen ol!</div>';
+                    return;
+                }
+                let html = '';
+                snap.forEach(doc => {
+                    const p = doc.data();
+                    html += `
+                    <div style="display:flex; align-items:center; justify-content:space-between; background:var(--bg); padding:8px 12px; border-radius:8px; border:1px solid var(--border);">
+                        <div style="min-width:0;">
+                            <div style="font-size:12px; font-weight:bold; color:var(--primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">🍿 Oda: ${p.roomName || doc.id}</div>
+                            <div style="font-size:10px; color:var(--text2);">Kurucu: @${p.host}</div>
+                        </div>
+                        <button onclick="App.joinWatchParty('${doc.id}')" style="padding:4px 10px; font-size:11px; border-radius:6px; background:var(--primary); color:white; border:none; cursor:pointer; font-weight:bold;">Katıl</button>
+                    </div>`;
+                });
+                list.innerHTML = html;
+            });
+    },
+
+    async createWatchParty() {
+        if (!db || !this.currentUser) return;
+        const roomName = prompt('Ortak İzleme Odası için bir isim girin:', `${this.currentUser} Odası`);
+        if (!roomName) return;
+
+        const partyId = 'wp_' + Math.random().toString(36).substr(2, 6);
+        try {
+            await db.collection('watchparties').doc(partyId).set({
+                roomName,
+                host: this.currentUser,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                state: 'paused',
+                videoTime: 0,
+                lastUpdated: Date.now()
+            });
+            this.joinWatchParty(partyId);
+        } catch (e) {
+            this.showToast('❌ Oda oluşturulamadı: ' + e.message);
+        }
+    },
+
+    async joinWatchParty(partyId) {
+        if (!partyId) {
+            partyId = prompt('Katılmak istediğiniz Oda Kodunu girin:');
+            if (!partyId) return;
+        }
+
+        this.currentWatchPartyId = partyId;
+        document.getElementById('watchPartyModal').style.display = 'flex';
+        const chatBox = document.getElementById('watchPartyChat');
+        if (chatBox) chatBox.innerHTML = '<div style="font-size:12px; color:var(--text3); text-align:center;">Odaya bağlanılıyor...</div>';
+
+        // Unsubscribe previous party listeners
+        if (this.watchPartyUnsubscribe) this.watchPartyUnsubscribe();
+        if (this.watchPartyChatUnsubscribe) this.watchPartyChatUnsubscribe();
+
+        // Listen to room playback status
+        this.watchPartyUnsubscribe = db.collection('watchparties').doc(partyId)
+            .onSnapshot(doc => {
+                if (doc.exists) {
+                    const data = doc.data();
+                    const timerEl = document.getElementById('watchTimer');
+                    if (timerEl) {
+                        const sec = Math.floor(data.videoTime || 0);
+                        const mins = Math.floor(sec / 60);
+                        const secs = sec % 60;
+                        timerEl.innerText = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+                    }
+                    const btnSync = document.getElementById('btnSyncTimer');
+                    if (btnSync) {
+                        btnSync.innerText = data.state === 'playing' ? '⏸️ Duraklat / Senkronize Et' : '▶️ Oynat / Senkronize Et';
+                    }
+                }
+            });
+
+        // Listen to room chat
+        this.watchPartyChatUnsubscribe = db.collection('watchparties').doc(partyId).collection('wpmsgs')
+            .orderBy('timestamp', 'asc').limit(50)
+            .onSnapshot(snap => {
+                if (!chatBox) return;
+                let html = '';
+                snap.forEach(mDoc => {
+                    const m = mDoc.data();
+                    const isMe = m.sender === this.currentUser;
+                    html += `
+                    <div style="font-size:12px; padding:4px 8px; border-radius:6px; background:${isMe ? 'rgba(168,85,247,0.2)' : 'var(--bg2)'}; align-self:${isMe ? 'flex-end' : 'flex-start'}; max-width:90%;">
+                        <span style="font-weight:bold; color:var(--primary); font-size:10px;">@${m.sender}:</span> ${m.text}
+                    </div>`;
+                });
+                chatBox.innerHTML = html || '<div style="font-size:12px; color:var(--text3); text-align:center;">Odaya katıldınız. Sohbet edebilirsiniz!</div>';
+                chatBox.scrollTop = chatBox.scrollHeight;
+            });
+    },
+
+    async sendWatchPartyMessage() {
+        const input = document.getElementById('wpChatInput');
+        if (!input || !input.value.trim() || !this.currentWatchPartyId || !db) return;
+        const text = input.value.trim();
+        input.value = '';
+
+        try {
+            await db.collection('watchparties').doc(this.currentWatchPartyId).collection('wpmsgs').add({
+                sender: this.currentUser,
+                text,
+                timestamp: firebase.firestore.FieldValue.serverTimestamp()
+            });
+        } catch (e) {
+            this.showToast('❌ Mesaj iletilemedi');
+        }
+    },
+
+    async toggleWatchPartyState() {
+        if (!this.currentWatchPartyId || !db) return;
+        try {
+            const docRef = db.collection('watchparties').doc(this.currentWatchPartyId);
+            const snap = await docRef.get();
+            if (snap.exists) {
+                const cur = snap.data().state;
+                const nextState = cur === 'playing' ? 'paused' : 'playing';
+                // Toggle playback state and bump timer 10 seconds for simulated fun synchronization demo
+                await docRef.update({
+                    state: nextState,
+                    videoTime: (snap.data().videoTime || 0) + (nextState === 'playing' ? 10 : 0),
+                    lastUpdated: Date.now()
+                });
+            }
+        } catch (e) {
+            console.warn('Sync error:', e);
+        }
     },
 
     async renderAiSuggestion() {
@@ -2395,19 +2685,22 @@ const App = {
         const msgBtn = document.getElementById('otherProfileMsgBtn');
         msgBtn.onclick = () => {
             this.closeModals();
-            this.openChat(handle);
+            this.safeOpenChat(handle);
         };
 
         const followBtn = document.getElementById('otherProfileFollowBtn');
         if (followBtn) {
-            if (this.state.following.includes(handle)) {
+            const isFollowing = this.state.following.includes(handle);
+            const isRequested = (this.state.sentRequests || []).includes(handle);
+            if (isFollowing) {
                 followBtn.innerText = 'Takibi Bırak';
-                followBtn.classList.remove('btn-primary');
-                followBtn.classList.add('btn-ghost');
+                followBtn.className = 'btn-ghost';
+            } else if (isRequested) {
+                followBtn.innerText = 'İstek Gönderildi';
+                followBtn.className = 'btn-secondary';
             } else {
                 followBtn.innerText = 'Takip Et';
-                followBtn.classList.remove('btn-ghost');
-                followBtn.classList.add('btn-primary');
+                followBtn.className = 'btn-primary';
             }
         }
         this.currentViewProfile = handle;
@@ -2554,42 +2847,9 @@ const App = {
     },
 
     async toggleFollow() {
-        if (!this.currentViewProfile || !db) return;
-        const targetHandle = this.currentViewProfile;
-        const isFollowing = this.state.following.includes(targetHandle);
-
-        try {
-            if (isFollowing) {
-                // Unfollow: remove from my following, remove me from their followers
-                this.state.following = this.state.following.filter(h => h !== targetHandle);
-                await db.collection('userData').doc(this.currentUser).set(
-                    { following: firebase.firestore.FieldValue.arrayRemove(targetHandle) },
-                    { merge: true }
-                );
-                await db.collection('userData').doc(targetHandle).set(
-                    { followers: firebase.firestore.FieldValue.arrayRemove(this.currentUser) },
-                    { merge: true }
-                );
-                this.showToast('Takipten çıkıldı');
-            } else {
-                // Follow: add to my following, add me to their followers
-                this.state.following.push(targetHandle);
-                await db.collection('userData').doc(this.currentUser).set(
-                    { following: firebase.firestore.FieldValue.arrayUnion(targetHandle) },
-                    { merge: true }
-                );
-                await db.collection('userData').doc(targetHandle).set(
-                    { followers: firebase.firestore.FieldValue.arrayUnion(this.currentUser) },
-                    { merge: true }
-                );
-                this.showToast('Takip ediliyor ❤️');
-            }
-            this.openOtherProfile(targetHandle);
-            this.renderProfileStats();
-        } catch(e) {
-            console.error('Follow error:', e);
-            this.showToast('❌ Hata: ' + e.message);
-        }
+        if (!this.currentViewProfile) return;
+        await this.quickToggleFollow(this.currentViewProfile);
+        setTimeout(() => this.openOtherProfile(this.currentViewProfile), 300);
     },
 
     toggleFavorite(type) {
