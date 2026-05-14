@@ -95,18 +95,21 @@ const App = {
             handleInput.addEventListener('input', async (e) => {
                 const handle = e.target.value.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
                 if (!handle) { suggestionBox.style.display = 'none'; return; }
-                if (db) {
+                // Gracefully skip if not authenticated yet
+                if (!db || !auth.currentUser) { suggestionBox.style.display = 'none'; return; }
+                try {
                     const snap = await db.collection('users').doc(handle).get();
                     if (snap.exists) {
                         let num = 1;
                         let suggested = `${handle}${num}`;
-                        // Simple increment suggestion (no deep loop for perf)
                         suggestionBox.innerHTML = `Bu ad alınmış. Şunu dene: <span style="font-weight:bold; text-decoration:underline;">@${suggested}</span>`;
                         suggestionBox.style.display = 'block';
                         suggestionBox.onclick = () => { handleInput.value = suggested; suggestionBox.style.display = 'none'; };
                     } else {
                         suggestionBox.style.display = 'none';
                     }
+                } catch(e) {
+                    suggestionBox.style.display = 'none';
                 }
             });
         }
@@ -143,18 +146,10 @@ const App = {
 
                 this.setAuthLoading(true, 'Hesap oluşturuluyor...');
                 try {
-                    // Check if handle is taken
-                    if (db) {
-                        const snap = await db.collection('users').doc(handle).get();
-                        if (snap.exists) {
-                            this.setAuthLoading(false);
-                            return alert('Bu kullanıcı adı alınmış.');
-                        }
-                    }
-
+                    // Create Firebase Auth account (duplicate handle = duplicate email = auth/email-already-in-use)
                     const cred = await auth.createUserWithEmailAndPassword(this.handleToEmail(handle), password);
 
-                    // Save profile to Firestore
+                    // Save profile to Firestore (user is now authenticated)
                     const userProfile = { handle, name, avatar, createdAt: Date.now(), uid: cred.user.uid };
                     if (db) {
                         await db.collection('users').doc(handle).set(userProfile);
