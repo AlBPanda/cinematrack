@@ -748,8 +748,23 @@
   </div>
 
   <!-- Watch Party Modal — v2.0 -->
+  <!-- Watch Party Davet Bildirimi -->
+  <div id="wpInviteNotification" style="display:none; position:fixed; top:16px; left:50%; transform:translateX(-50%); z-index:9999; min-width:300px; max-width:90vw; background:var(--bg2); border:1px solid var(--primary); border-radius:14px; box-shadow:0 8px 32px rgba(0,0,0,0.5); padding:14px 16px; animation: slideDown 0.3s ease;">
+    <div style="display:flex; align-items:center; gap:10px;">
+      <div style="font-size:24px; flex-shrink:0;">🍿</div>
+      <div style="flex:1; min-width:0;">
+        <div id="wpInviteText" style="font-size:13px; font-weight:700; color:var(--text); margin-bottom:2px;">Davet aldınız!</div>
+        <div id="wpInviteSubText" style="font-size:11px; color:var(--text2);">Ortak izleme odasına katılmak ister misiniz?</div>
+      </div>
+      <div style="display:flex; gap:6px; flex-shrink:0;">
+        <button id="wpInviteAcceptBtn" style="background:var(--primary); color:white; border:none; border-radius:8px; padding:6px 12px; font-size:12px; font-weight:700; cursor:pointer;">Katıl</button>
+        <button id="wpInviteDismissBtn" onclick="document.getElementById('wpInviteNotification').style.display='none'" style="background:var(--bg3); color:var(--text2); border:1px solid var(--border); border-radius:8px; padding:6px 10px; font-size:12px; cursor:pointer;">✕</button>
+      </div>
+    </div>
+  </div>
+
   <div class="modal-overlay" id="watchPartyModal" style="z-index: 2000;">
-    <div class="modal wp-modal" style="display:flex; flex-direction:column; padding:0; height:90vh; max-height:860px; overflow:hidden;">
+    <div class="modal wp-modal" id="wpModalInner" style="display:flex; flex-direction:column; padding:0; height:90vh; max-height:860px; overflow:hidden;">
 
       <!-- Header -->
       <div class="wp-modal-header">
@@ -757,7 +772,8 @@
           <div style="font-weight:700; font-size:15px; color:var(--text);">🍿 Ortak İzleme</div>
           <div style="font-size:11px; color:var(--text2);">Bağlanılıyor...</div>
         </div>
-        <div style="display:flex; gap:8px; align-items:center;">
+        <div style="display:flex; gap:6px; align-items:center;">
+          <button id="wpFullscreenBtn" title="Tam Ekran" onclick="App._wpToggleFullscreen()" style="background:var(--bg3); border:1px solid var(--border); color:var(--text2); border-radius:8px; padding:5px 9px; cursor:pointer; font-size:13px;" title="Tam Ekran">⛶</button>
           <button id="wpClosePartyBtn" title="Odadan Çık" style="background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.3); color:var(--red); border-radius:8px; padding:5px 10px; cursor:pointer; font-size:11px; font-weight:700;">🚪 Çıkış</button>
           <button class="modal-close" id="watchPartyCloseBtn" style="position:static;">✕</button>
         </div>
@@ -777,17 +793,57 @@
         </div>
 
         <!-- Host Kontrolleri -->
-        <div id="wpHostControls" class="wp-host-controls" style="display:none;">
-          <button id="wpPlayBtn" class="wp-play-btn" title="Oynat / Duraklat">
-            <svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><polygon points="5,3 19,12 5,21"/></svg>
-          </button>
-          <div style="font-size:11px; color:var(--text2); text-align:center; margin-top:2px;">Tüm üyeler için senkronize oynatır</div>
+        <div id="wpHostControls" class="wp-host-controls" style="display:none; flex-direction:column; gap:10px;">
+          <!-- Ana oynat/duraklat butonu -->
+          <div style="display:flex; align-items:center; justify-content:center; gap:12px;">
+            <!-- 15sn geri -->
+            <button onclick="App._wpSeek(-15)" title="-15 saniye" style="background:var(--bg3); border:1px solid var(--border); border-radius:50%; width:36px; height:36px; color:var(--text); cursor:pointer; font-size:13px; display:flex; align-items:center; justify-content:center;">
+              <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M12.5 3a9 9 0 1 0 9 9h-2a7 7 0 1 1-7-7V7l-4-4 4-4v2.05c.17.01.33.05.5.07z"/><text x="7" y="17" font-size="6" fill="currentColor" font-weight="bold">15</text></svg>
+            </button>
+            <button id="wpPlayBtn" class="wp-play-btn" title="Oynat / Duraklat">
+              <svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><polygon points="5,3 19,12 5,21"/></svg>
+            </button>
+            <!-- 15sn ileri -->
+            <button onclick="App._wpSeek(15)" title="+15 saniye" style="background:var(--bg3); border:1px solid var(--border); border-radius:50%; width:36px; height:36px; color:var(--text); cursor:pointer; font-size:13px; display:flex; align-items:center; justify-content:center;">
+              <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M11.5 3v2.05c.17-.02.33-.06.5-.07l4 4-4 4V11a7 7 0 1 1-7 7h-2a9 9 0 1 0 9-9z"/><text x="7" y="17" font-size="6" fill="currentColor" font-weight="bold">15</text></svg>
+            </button>
+          </div>
+
+          <!-- Seek (ilerleme) slider -->
+          <div style="padding: 0 4px;">
+            <input type="range" id="wpSeekSlider" min="0" max="7200" value="0" step="1"
+              style="width:100%; accent-color:var(--primary); cursor:pointer; height:4px;"
+              oninput="App._wpSeekSliderInput(this.value)"
+              onchange="App._wpSeekSliderCommit(this.value)" />
+          </div>
+
+          <!-- Hız + Altyazı -->
+          <div style="display:flex; align-items:center; justify-content:center; gap:8px; flex-wrap:wrap;">
+            <span style="font-size:11px; color:var(--text3);">Hız:</span>
+            <div id="wpSpeedBtns" style="display:flex; gap:4px;">
+              <button onclick="App._wpSetSpeed(0.5)" data-speed="0.5" style="padding:3px 7px; border-radius:6px; border:1px solid var(--border); background:var(--bg3); color:var(--text2); font-size:11px; cursor:pointer;">0.5x</button>
+              <button onclick="App._wpSetSpeed(0.75)" data-speed="0.75" style="padding:3px 7px; border-radius:6px; border:1px solid var(--border); background:var(--bg3); color:var(--text2); font-size:11px; cursor:pointer;">0.75x</button>
+              <button onclick="App._wpSetSpeed(1)" data-speed="1" style="padding:3px 7px; border-radius:6px; border:1px solid var(--border); background:var(--primary); color:white; font-size:11px; cursor:pointer; font-weight:700;">1x</button>
+              <button onclick="App._wpSetSpeed(1.25)" data-speed="1.25" style="padding:3px 7px; border-radius:6px; border:1px solid var(--border); background:var(--bg3); color:var(--text2); font-size:11px; cursor:pointer;">1.25x</button>
+              <button onclick="App._wpSetSpeed(1.5)" data-speed="1.5" style="padding:3px 7px; border-radius:6px; border:1px solid var(--border); background:var(--bg3); color:var(--text2); font-size:11px; cursor:pointer;">1.5x</button>
+              <button onclick="App._wpSetSpeed(2)" data-speed="2" style="padding:3px 7px; border-radius:6px; border:1px solid var(--border); background:var(--bg3); color:var(--text2); font-size:11px; cursor:pointer;">2x</button>
+            </div>
+            <button id="wpSubtitleBtn" onclick="App._wpToggleSubtitles()" title="Altyazı" style="padding:3px 10px; border-radius:6px; border:1px solid var(--border); background:var(--bg3); color:var(--text2); font-size:11px; cursor:pointer; display:flex; align-items:center; gap:4px;">
+              <span>CC</span><span id="wpSubtitleStatus" style="font-size:9px; color:var(--text3);">Kapalı</span>
+            </button>
+          </div>
+
+          <div style="font-size:10px; color:var(--text3); text-align:center;">Tüm üyeler için senkronize oynatır</div>
         </div>
 
         <!-- Misafir Bildirimi -->
-        <div id="wpGuestNotice" style="display:flex; align-items:center; justify-content:center; gap:6px; padding:6px 12px; background:rgba(0,0,0,0.2); border-radius:10px; width:100%;">
-          <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-          <span style="font-size:11px; color:var(--text2);">Oynatma kontrolü host'a ait</span>
+        <div id="wpGuestNotice" style="display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; padding:8px 12px; background:rgba(0,0,0,0.2); border-radius:10px; width:100%;">
+          <div style="display:flex; align-items:center; gap:6px;">
+            <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <span style="font-size:11px; color:var(--text2);">Oynatma kontrolü host'a ait</span>
+          </div>
+          <!-- Misafir için hız göstergesi -->
+          <div id="wpGuestSpeed" style="font-size:10px; color:var(--text3);">Hız: 1x</div>
         </div>
       </div>
 

@@ -30,7 +30,8 @@ const App = {
         streak: 0,
         lastWatchDate: null,
         globalUsers: [],
-        currentUserData: null
+        currentUserData: null,
+        hiddenChats: []
     },
     
     currentTab: 'dashboard',
@@ -194,7 +195,7 @@ const App = {
     async logout() {
         if (auth) await auth.signOut();
         this.currentUser = null;
-        this.state = { movies: [], series: [], goal: 5, goalCurrent: 0, goalWeek: '', streak: 0, lastWatchDate: null, globalUsers: [], currentUserData: null, following: [] };
+        this.state = { movies: [], series: [], goal: 5, goalCurrent: 0, goalWeek: '', streak: 0, lastWatchDate: null, globalUsers: [], currentUserData: null, following: [], followers: [], followRequests: [], sentRequests: [], hiddenChats: [] };
         this.eventsBound = false;
         document.getElementById('app').classList.add('hidden');
         document.getElementById('loginScreen').classList.remove('hidden');
@@ -264,6 +265,7 @@ const App = {
         this.state.followers = [];
         this.state.followRequests = [];
         this.state.sentRequests = [];
+        this.state.hiddenChats = [];
 
         // Load user data from Firestore
         if (db) {
@@ -282,6 +284,7 @@ const App = {
                     this.state.followers   = d.followers    || [];
                     this.state.followRequests = d.followRequests || [];
                     this.state.sentRequests   = d.sentRequests   || [];
+                    this.state.hiddenChats    = d.hiddenChats    || [];
                 } else {
                     // First login — check for legacy localStorage data to migrate
                     const legacyMovies = localStorage.getItem(`cinetrack_${this.currentUser}_movies`);
@@ -311,6 +314,7 @@ const App = {
                         this.state.followers      = d.followers      || [];
                         this.state.followRequests = d.followRequests || [];
                         this.state.sentRequests   = d.sentRequests   || [];
+                        this.state.hiddenChats    = d.hiddenChats    || [];
 
                         this.renderFollowRequestsUI();
                         if (this.currentTab === 'social') {
@@ -335,6 +339,7 @@ const App = {
         this.renderAll();
         this.updateUnreadBadges();
         this.renderFollowRequestsUI();
+        this._startWpInviteListener();
 
         // Easter Eggs Check
         if (this.currentUser === 'deniz') {
@@ -432,9 +437,11 @@ const App = {
         if (this.chatUnsubscribe) this.chatUnsubscribe();
         if (this.userDataUnsubscribe) this.userDataUnsubscribe();
         if (this.watchPartyUnsubscribe) this.watchPartyUnsubscribe();
+        if (this._wpInviteUnsubscribe) this._wpInviteUnsubscribe();
+        this._wpKnownMemberships = {};
         if (auth) await auth.signOut();
         this.currentUser = null;
-        this.state = { movies: [], series: [], goal: 5, goalCurrent: 0, goalWeek: '', streak: 0, lastWatchDate: null, globalUsers: [], currentUserData: null, following: [], followers: [], followRequests: [], sentRequests: [] };
+        this.state = { movies: [], series: [], goal: 5, goalCurrent: 0, goalWeek: '', streak: 0, lastWatchDate: null, globalUsers: [], currentUserData: null, following: [], followers: [], followRequests: [], sentRequests: [], hiddenChats: [] };
         this.eventsBound = false;
         document.getElementById('app').classList.add('hidden');
         document.getElementById('loginScreen').classList.remove('hidden');
@@ -450,7 +457,8 @@ const App = {
             goalWeek: this.state.goalWeek,
             streak: this.state.streak,
             lastWatchDate: this.state.lastWatchDate || null,
-            following: this.state.following
+            following: this.state.following,
+            hiddenChats: this.state.hiddenChats || []
         };
         if (db) {
             db.collection('userData').doc(this.currentUser).set(payload, { merge: true })
@@ -2339,23 +2347,32 @@ const App = {
         if (!list || !db || !this.currentUser) return;
 
         const contacts = this.state.following || [];
-        if (contacts.length === 0) {
+        const visibleContacts = contacts.filter(h => !(this.state.hiddenChats || []).includes(h));
+
+        if (visibleContacts.length === 0) {
             list.innerHTML = `
                 <div class="empty-widget" style="text-align:center; color:var(--text3); padding:32px 16px;">
                     <div style="font-size:36px; margin-bottom:8px;">💬</div>
-                    <div>Takip ettiğin (istek onaylayan) biri yok. Yukarıdan birini bul!</div>
+                    <div>Sohbet listesi boş. Yukarıdaki aramadan birini bul ve mesaj at!</div>
                 </div>`;
             return;
         }
 
-        list.innerHTML = contacts.map(handle => {
+        list.innerHTML = visibleContacts.map(handle => {
             const u = this.state.globalUsers.find(x => x.handle === handle) || { handle, name: handle, avatar: '👤' };
             return `
             <div onclick="App.openChat('${u.handle}')" 
+                 onmousedown="App.onConversationPressStart('${u.handle}')"
+                 onmouseup="App.onConversationPressEnd()"
+                 onmouseleave="App.onConversationPressEnd(); this.style.background='var(--bg2)'"
+                 ontouchstart="App.onConversationPressStart('${u.handle}')"
+                 ontouchend="App.onConversationPressEnd()"
+                 oncontextmenu="event.preventDefault(); App.deleteConversation('${u.handle}'); return false;"
                  style="display:flex; align-items:center; gap:12px; padding:14px 16px; border-radius:12px;
                         background:var(--bg2); border:1px solid var(--border); margin-bottom:10px;
-                        cursor:pointer; transition:all 0.2s;"
-                 onmouseenter="this.style.background='var(--bg3)'" onmouseleave="this.style.background='var(--bg2)'">
+                        cursor:pointer; transition:all 0.2s; user-select:none; -webkit-user-select:none;"
+                 onmouseenter="this.style.background='var(--bg3)'"
+                 title="Silmek için basılı tut veya sağ tıkla">
                 <div style="font-size:32px; flex-shrink:0;">${u.avatar || '👤'}</div>
                 <div style="flex:1; min-width:0;">
                     <div style="font-size:14px; font-weight:700;">${u.name}</div>
@@ -2364,6 +2381,59 @@ const App = {
                 <div style="color:var(--primary); font-size:20px;">›</div>
             </div>`;
         }).join('');
+    },
+
+    onConversationPressStart(handle) {
+        if (this._pressTimer) clearTimeout(this._pressTimer);
+        this._pressTimer = setTimeout(() => {
+            this._pressTimer = null;
+            this.isLongPressing = true;
+            this.deleteConversation(handle);
+        }, 600);
+    },
+
+    onConversationPressEnd() {
+        if (this._pressTimer) {
+            clearTimeout(this._pressTimer);
+            this._pressTimer = null;
+        }
+        setTimeout(() => {
+            this.isLongPressing = false;
+        }, 200);
+    },
+
+    async deleteConversation(handle) {
+        this.isLongPressing = true;
+        setTimeout(() => this.isLongPressing = false, 500);
+
+        const u = this.state.globalUsers.find(x => x.handle === handle) || { name: handle };
+        if (!confirm(`${u.name} ile olan sohbeti silmek istediğinize emin misiniz?`)) {
+            return;
+        }
+
+        if (!this.state.hiddenChats) this.state.hiddenChats = [];
+        if (!this.state.hiddenChats.includes(handle)) {
+            this.state.hiddenChats.push(handle);
+        }
+        this.save();
+
+        this.renderConversationsList();
+        this.showToast('🗑️ Sohbet silindi');
+
+        // Optionally delete messages from Firestore collection
+        if (db) {
+            const chatId = [this.currentUser, handle].sort().join('_');
+            try {
+                const snap = await db.collection('messages').doc(chatId).collection('msgs').get();
+                if (!snap.empty) {
+                    const batch = db.batch();
+                    snap.docs.forEach(doc => batch.delete(doc.ref));
+                    await batch.commit();
+                }
+            } catch (e) {
+                console.warn('Mesaj silme hatası:', e);
+            }
+        }
     },
 
     // ==========================================
@@ -2561,10 +2631,12 @@ const App = {
         this._wpPlaying = false;
 
         // Oda verisini dinle
+        this._wpPrevMembers = null;
         this.watchPartyUnsubscribe = db.collection('watchparties').doc(partyId)
             .onSnapshot(doc => {
                 if (!doc.exists) return;
                 const data = doc.data();
+                const prevData = this._wpCurrentPartyData;
                 this._wpCurrentPartyData = data;
                 const isHost = data.host === this.currentUser;
 
@@ -2581,19 +2653,42 @@ const App = {
                 // İçerik bilgisi
                 this._wpUpdateContentDisplay(data, isHost);
 
-                // Oynatıcı senkronu
+                // Oynatıcı senkronu — tüm kullanıcılar için (host dahil)
+                // Yeni üye katıldığında: host güncel zamanı Firestore'a yazar
+                const currentMembers = data.members || [];
+                const prevMembers = this._wpPrevMembers || [];
+                if (isHost && prevMembers.length > 0 && currentMembers.length > prevMembers.length) {
+                    // Yeni üye geldi — host güncel pozisyonu Firestore'a yaz
+                    const currentTime = this._wpLocalTime || 0;
+                    const updatePayload = { videoTime: currentTime, lastUpdated: Date.now() };
+                    if (data.state === 'playing') updatePayload.videoStartedAt = Date.now();
+                    db.collection('watchparties').doc(partyId).update(updatePayload).catch(() => {});
+                }
+                this._wpPrevMembers = [...currentMembers];
+
                 if (data.state === 'playing' && data.videoStartedAt) {
                     const elapsed = (Date.now() - data.videoStartedAt) / 1000;
-                    this._wpLocalTime = (data.videoTime || 0) + elapsed;
+                    const newTime = (data.videoTime || 0) + elapsed;
+                    // Eğer zaman farkı 3sn'den fazlaysa re-sync yap
+                    if (Math.abs(newTime - this._wpLocalTime) > 3 || !this._wpPlaying) {
+                        this._wpLocalTime = newTime;
+                    }
                     if (!this._wpPlaying) {
                         this._wpPlaying = true;
                         this._wpStartLocalTimer();
                     }
                 } else {
                     this._wpPlaying = false;
-                    this._wpLocalTime = data.videoTime || 0;
+                    // Eğer seek olduysa zamanı güncelle
+                    const remoteTime = data.videoTime || 0;
+                    if (Math.abs(remoteTime - this._wpLocalTime) > 1) {
+                        this._wpLocalTime = remoteTime;
+                    }
                     if (this.wpTimerInterval) { clearInterval(this.wpTimerInterval); this.wpTimerInterval = null; }
                     this._wpRenderTimer(this._wpLocalTime);
+                    // Seek slider güncelle
+                    const slider = document.getElementById('wpSeekSlider');
+                    if (slider && !this._wpSliderDragging) slider.value = Math.floor(this._wpLocalTime);
                 }
 
                 // Host kontrolleri
@@ -2609,6 +2704,29 @@ const App = {
                     playBtn.innerHTML = data.state === 'playing'
                         ? '<svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>'
                         : '<svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><polygon points="5,3 19,12 5,21"/></svg>';
+                }
+
+                // Hız UI
+                const speed = data.playbackSpeed || 1;
+                this._wpApplySpeedUI(speed);
+
+                // Altyazı UI
+                this._wpApplySubtitleUI(!!data.subtitlesOn);
+
+                // Seek slider max güncelle (içerik süresi varsa)
+                const content = data.selectedContent;
+                if (content) {
+                    let durationSec = 7200; // default 2 saat
+                    if (content.type === 'movie' && content.duration) durationSec = content.duration * 60;
+                    else if (content.type === 'series' && content.episode?.duration) durationSec = content.episode.duration * 60;
+                    const slider = document.getElementById('wpSeekSlider');
+                    if (slider) slider.max = durationSec;
+                }
+
+                // Oda kapatıldıysa modal'ı kapat
+                if (data.status === 'closed' && !isHost) {
+                    this.showToast('🚪 Oda host tarafından kapatıldı.');
+                    this._closeWpModal();
                 }
             });
 
@@ -2922,6 +3040,11 @@ const App = {
             if (this._wpPlaying) {
                 this._wpLocalTime += 1;
                 this._wpRenderTimer(this._wpLocalTime);
+                // Seek slider güncelle (host veya misafir)
+                const slider = document.getElementById('wpSeekSlider');
+                if (slider && !this._wpSliderDragging) {
+                    slider.value = Math.floor(this._wpLocalTime);
+                }
             }
         }, 1000);
     },
@@ -2934,6 +3057,131 @@ const App = {
         const m = Math.floor((s % 3600) / 60);
         const sec = s % 60;
         el.innerText = (h > 0 ? String(h).padStart(2,'0') + ':' : '') + String(m).padStart(2,'0') + ':' + String(sec).padStart(2,'0');
+    },
+
+    // Seek slider - kullanıcı sürüklerken sadece local timer'ı güncelle
+    _wpSeekSliderInput(val) {
+        this._wpSliderDragging = true;
+        this._wpRenderTimer(parseFloat(val));
+    },
+
+    // Seek slider - bırakınca Firestore'a yaz
+    async _wpSeekSliderCommit(val) {
+        this._wpSliderDragging = false;
+        await this._wpSeek(0, parseFloat(val));
+    },
+
+    // seek(delta, absoluteTime) — delta: saniye ekle/çıkar, absolute: direkt atla
+    async _wpSeek(delta, absoluteTime = null) {
+        if (!this.currentWatchPartyId || !db) return;
+        const data = this._wpCurrentPartyData;
+        if (!data || data.host !== this.currentUser) return;
+
+        let newTime = absoluteTime !== null ? absoluteTime : (this._wpLocalTime + delta);
+        newTime = Math.max(0, newTime);
+        this._wpLocalTime = newTime;
+        this._wpRenderTimer(newTime);
+
+        const updateData = {
+            videoTime: newTime,
+            lastUpdated: Date.now()
+        };
+        if (data.state === 'playing') {
+            updateData.videoStartedAt = Date.now();
+        }
+        try {
+            await db.collection('watchparties').doc(this.currentWatchPartyId).update(updateData);
+            if (delta !== 0 && absoluteTime === null) {
+                const sign = delta > 0 ? '+' : '';
+                this.showToast(`⏩ ${sign}${delta}s`);
+            }
+        } catch(e) {
+            this.showToast('❌ Seek hatası');
+        }
+    },
+
+    // Oynatma hızını değiştir (Firestore'a yaz, tüm üyeler görsün)
+    async _wpSetSpeed(speed) {
+        if (!this.currentWatchPartyId || !db) return;
+        const data = this._wpCurrentPartyData;
+        if (!data || data.host !== this.currentUser) return;
+
+        try {
+            await db.collection('watchparties').doc(this.currentWatchPartyId).update({
+                playbackSpeed: speed,
+                lastUpdated: Date.now()
+            });
+            this._wpApplySpeedUI(speed);
+        } catch(e) {
+            this.showToast('❌ Hız değiştirilemedi');
+        }
+    },
+
+    _wpApplySpeedUI(speed) {
+        // Host kontrol butonlarını güncelle
+        document.querySelectorAll('#wpSpeedBtns button').forEach(btn => {
+            const s = parseFloat(btn.dataset.speed || btn.onclick?.toString().match(/[\d.]+/)?.[0]);
+            btn.classList.toggle('active-speed', parseFloat(btn.getAttribute('onclick')?.match(/[\d.]+/)?.[0]) === speed);
+        });
+        // Misafir hız göstergesini güncelle
+        const guestSpeed = document.getElementById('wpGuestSpeed');
+        if (guestSpeed) guestSpeed.textContent = `Hız: ${speed}x`;
+    },
+
+    // Altyazı toggle (Firestore'a yaz)
+    async _wpToggleSubtitles() {
+        if (!this.currentWatchPartyId || !db) return;
+        const data = this._wpCurrentPartyData;
+        if (!data || data.host !== this.currentUser) return;
+
+        const newVal = !data.subtitlesOn;
+        try {
+            await db.collection('watchparties').doc(this.currentWatchPartyId).update({
+                subtitlesOn: newVal,
+                lastUpdated: Date.now()
+            });
+        } catch(e) {}
+    },
+
+    _wpApplySubtitleUI(on) {
+        const btn = document.getElementById('wpSubtitleBtn');
+        const status = document.getElementById('wpSubtitleStatus');
+        if (btn) btn.classList.toggle('subtitle-on', on);
+        if (status) status.textContent = on ? 'Açık' : 'Kapalı';
+    },
+
+    // Tam ekran toggle
+    _wpToggleFullscreen() {
+        const modal = document.getElementById('wpModalInner');
+        const btn = document.getElementById('wpFullscreenBtn');
+        if (!modal) return;
+
+        if (!document.fullscreenElement) {
+            // Önce tarayıcı native fullscreen dene
+            const overlay = document.getElementById('watchPartyModal');
+            (overlay.requestFullscreen || overlay.webkitRequestFullscreen || overlay.mozRequestFullScreen)?.call(overlay)
+                .then(() => {
+                    modal.classList.add('wp-fullscreen-mode');
+                    if (btn) btn.textContent = '⊠';
+                })
+                .catch(() => {
+                    // Fallback: CSS ile tam ekran
+                    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:9998;display:flex;';
+                    modal.style.cssText = 'width:100vw;height:100vh;max-height:100vh;border-radius:0;';
+                    this._wpFakeFullscreen = true;
+                    if (btn) btn.textContent = '⊠';
+                });
+        } else {
+            document.exitFullscreen?.();
+            modal.classList.remove('wp-fullscreen-mode');
+            if (this._wpFakeFullscreen) {
+                const overlay = document.getElementById('watchPartyModal');
+                overlay.style.cssText = '';
+                modal.style.cssText = '';
+                this._wpFakeFullscreen = false;
+            }
+            if (btn) btn.textContent = '⛶';
+        }
     },
 
     async toggleWatchPartyState() {
@@ -3105,6 +3353,78 @@ const App = {
         // Artık bindEvents içinde bağlanıyor — bu metod eski compat için bırakıldı
     },
 
+    // Davet bildirimlerini dinle — takipçilerden gelen odaları izle
+    _startWpInviteListener() {
+        if (!db || !this.currentUser) return;
+        if (this._wpInviteUnsubscribe) this._wpInviteUnsubscribe();
+
+        // Kullanıcının member listesine eklendiği odaları dinle
+        this._wpInviteUnsubscribe = db.collection('watchparties')
+            .where('status', '==', 'open')
+            .onSnapshot(snap => {
+                snap.docChanges().forEach(change => {
+                    if (change.type === 'modified') {
+                        const data = change.doc.data();
+                        const partyId = change.doc.id;
+                        const members = data.members || [];
+                        const prevMembers = this._wpKnownMemberships || {};
+
+                        const wasNotMember = !prevMembers[partyId];
+                        const isNowMember = members.includes(this.currentUser);
+                        const isHost = data.host === this.currentUser;
+
+                        // Kendi oluşturduğumuz oda veya zaten açık modal → geç
+                        if (isHost) return;
+                        if (this.currentWatchPartyId === partyId) return;
+
+                        if (wasNotMember && isNowMember) {
+                            // Davet onaylandı — bildirim göster
+                            this._wpShowInviteNotification(partyId, data);
+                        }
+
+                        // State güncelle
+                        if (!this._wpKnownMemberships) this._wpKnownMemberships = {};
+                        this._wpKnownMemberships[partyId] = isNowMember;
+                    } else if (change.type === 'added') {
+                        // İlk yüklemede mevcut üyelikleri kaydet (bildirim tetikleme)
+                        const data = change.doc.data();
+                        const partyId = change.doc.id;
+                        if (!this._wpKnownMemberships) this._wpKnownMemberships = {};
+                        this._wpKnownMemberships[partyId] = (data.members || []).includes(this.currentUser);
+                    }
+                });
+            }, () => {}); // Sessizce hata yakala
+    },
+
+    _wpShowInviteNotification(partyId, data) {
+        const notif = document.getElementById('wpInviteNotification');
+        const textEl = document.getElementById('wpInviteText');
+        const subEl = document.getElementById('wpInviteSubText');
+        const acceptBtn = document.getElementById('wpInviteAcceptBtn');
+        if (!notif) return;
+
+        const hostUser = this.state.globalUsers.find(u => u.handle === data.host);
+        const hostName = hostUser ? `${hostUser.avatar || '🎬'} @${data.host}` : `@${data.host}`;
+        if (textEl) textEl.textContent = `${hostName} sizi odaya davet etti!`;
+        if (subEl) subEl.textContent = `🍿 ${data.roomName}`;
+
+        // Eski click listener'ı temizle
+        const newAcceptBtn = acceptBtn.cloneNode(true);
+        acceptBtn.parentNode.replaceChild(newAcceptBtn, acceptBtn);
+        newAcceptBtn.addEventListener('click', () => {
+            notif.style.display = 'none';
+            this.openWatchPartyRoom(partyId);
+        });
+
+        notif.style.display = 'flex';
+
+        // 12 saniye sonra otomatik kapat
+        clearTimeout(this._wpInviteTimer);
+        this._wpInviteTimer = setTimeout(() => {
+            notif.style.display = 'none';
+        }, 12000);
+    },
+
     // ==========================================
     // OTHER METHODS
     // ==========================================
@@ -3208,6 +3528,7 @@ const App = {
     },
 
     openChat(handle) {
+        if (this.isLongPressing) return;
         const user = this.state.globalUsers.find(u => u.handle === handle);
         if (!user) return;
 
@@ -3282,6 +3603,12 @@ const App = {
 
         if (!db) return;
 
+        if (this.state.hiddenChats && this.state.hiddenChats.includes(this.currentChatHandle)) {
+            this.state.hiddenChats = this.state.hiddenChats.filter(h => h !== this.currentChatHandle);
+            this.save();
+            this.renderConversationsList();
+        }
+
         const chatId = [this.currentUser, this.currentChatHandle].sort().join('_');
         try {
             await db.collection('messages').doc(chatId).collection('msgs').add({
@@ -3305,6 +3632,23 @@ const App = {
             .where('read', '==', false)
             .get().catch(() => null);
         const count = snap ? snap.size : 0;
+
+        if (snap && !snap.empty) {
+            let hasUnhidden = false;
+            snap.docs.forEach(doc => {
+                const d = doc.data();
+                if (d.sender && this.state.hiddenChats && this.state.hiddenChats.includes(d.sender)) {
+                    this.state.hiddenChats = this.state.hiddenChats.filter(h => h !== d.sender);
+                    hasUnhidden = true;
+                }
+            });
+            if (hasUnhidden) {
+                this.save();
+                if (this.currentTab === 'social') {
+                    this.renderConversationsList();
+                }
+            }
+        }
 
         const badge = document.getElementById('socialUnreadBadge');
         if (badge) {
