@@ -335,7 +335,7 @@ select {
   position: absolute; top: 6px; left: 6px;
   background: rgba(0,0,0,0.6); color: #ffd700;
   padding: 3px 6px; border-radius: 4px; font-size: 10px; font-weight: 700;
-  backdrop-filter: blur(4px); display: flex; align-items: center; gap: 3px;
+  backdrop-filter: blur(4px); display: flex; align-items: center; gap: 3px; justify-content: center;
 }
 .must-watch-badge {
   position: absolute; top: 6px; right: 6px;

@@ -135,6 +135,10 @@
             <h1 class="header-title" style="font-size: 20px; font-weight:700;">Hoşgeldin, <span id="userNameDisplay" style="color:var(--primary);">...</span> 👋</h1>
             <p class="header-subtitle" style="font-size:13px; color:var(--text2); margin-top:4px;">İzleme durumun harika görünüyor!</p>
           </div>
+          <div style="text-align:right; display:flex; flex-direction:column; align-items:flex-end;">
+            <div id="liveClock" style="font-size: 16px; font-weight: 700; font-family: 'Outfit', sans-serif; color: var(--text);">00:00</div>
+            <div id="liveDate" style="font-size: 11px; color: var(--text3); margin-top:2px;">--</div>
+          </div>
         </header>
         <div class="widgets-grid">
           <!-- Premium Weekly Goal Widget -->
@@ -282,7 +286,10 @@
           </div>
           <div class="profile-info">
             <h2 id="profileUserNameFull" style="font-size: 18px; font-weight: 700; margin-bottom: 4px;">Kullanıcı</h2>
-            <p style="font-size: 13px; color: var(--text3);">CineTrack VIP Üyesi</p>
+            <div style="font-size: 13px; color: var(--text2); display:flex; gap:12px; margin-top:4px;">
+               <div style="cursor:pointer;" onclick="App.openFollowModal('following')"><strong style="color:var(--text);" id="statFollowing">0</strong> Takip</div>
+               <div style="cursor:pointer;" onclick="App.openFollowModal('followers')"><strong style="color:var(--text);" id="statFollowers">0</strong> Takipçi</div>
+            </div>
           </div>
           <button class="icon-btn" onclick="App.logout()" style="color: var(--red); border-color: rgba(239, 68, 68, 0.2);" title="Çıkış Yap">
             <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
@@ -315,32 +322,32 @@
         <!-- Badges & Streak Section -->
         <div class="widget stats-widget" style="margin-bottom: 24px;">
           <h3 class="widget-title">🎖️ Başarımlar & Seri</h3>
-          <div class="stats-row" style="margin-bottom: 16px;">
-            <div class="stat-card" style="flex:1;">
-              <span class="stat-num" id="statStreak" style="color: var(--amber);">🔥 0</span>
+          <div style="display:flex; gap:12px; margin-bottom: 16px;">
+            <div class="stat-card" style="flex:1; padding: 12px 8px;">
+              <span class="stat-num" id="statStreak" style="font-size: 18px; background: none; -webkit-text-fill-color: var(--amber); color: var(--amber);">🔥 0</span>
               <span class="stat-label">Giriş Serisi</span>
             </div>
-            <div class="stat-card" style="flex:1;">
-              <span class="stat-num" id="statBadgeCount">0</span>
+            <div class="stat-card" style="flex:1; padding: 12px 8px;">
+              <span class="stat-num" id="statBadgeCount" style="font-size: 18px;">0</span>
               <span class="stat-label">Kazanılan Rozet</span>
             </div>
           </div>
           <div id="badgesList" style="display:flex; gap:10px; overflow-x:auto; padding-bottom: 8px;">
             <div class="empty-widget" style="width:100%; text-align:center;">Henüz rozet kazanılmadı</div>
           </div>
+          <button class="btn-ghost" id="btnAllBadges" style="width:100%; margin-top:8px; font-size:13px;">Tüm Rozetler</button>
         </div>
 
         <!-- Advanced Stats (Chart.js) -->
         <div class="widget stats-widget" style="margin-bottom: 24px;">
           <h3 class="widget-title">📈 Gelişmiş İstatistikler</h3>
-          <div style="position: relative; height: 250px; width: 100%;">
+          <div style="position: relative; height: 180px; width: 100%; display: flex; justify-content: center;">
             <canvas id="genreChart"></canvas>
           </div>
         </div>
 
         <div class="profile-actions" style="display: flex; gap: 12px; margin-bottom: 24px;">
-          <button class="btn-primary" id="btnWrapped" style="flex:1; background: linear-gradient(135deg, #f59e0b, #ec4899);">🎉 2026 Özetini Gör</button>
-          <button class="btn-primary" id="btnFriendList" style="flex:1; background: linear-gradient(135deg, #3b82f6, #06b6d4);">🤝 Ortak Liste</button>
+          <button class="btn-primary" id="btnWrapped" style="flex:1; background: linear-gradient(135deg, #f59e0b, #ec4899);">🎉 Aylık Özeti Gör</button>
         </div>
 
         <div class="theme-section">
@@ -371,6 +378,11 @@
             </div>
           </div>
         </div>
+
+        <button class="btn-danger" id="deleteAccountBtn" style="width: 100%; margin-top: 24px; display:flex; align-items:center; justify-content:center; gap:8px;">
+          <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/><line x1="18" y1="9" x2="12" y2="15"/><line x1="12" y1="9" x2="18" y2="15"/></svg>
+          Hesabı Kalıcı Olarak Sil
+        </button>
       </section>
 
       <!-- Social Tab -->
@@ -553,8 +565,9 @@
         <button class="modal-close" id="seriesDetailCloseBtn">✕</button>
       </div>
       <div class="modal-body" id="seriesDetailBody"></div>
-      <div class="modal-footer">
-        <button class="btn-danger" id="seriesDetailDeleteBtn" style="width:100%;">🗑️ Sil</button>
+      <div class="modal-footer" style="display:flex; gap:10px;">
+        <button class="btn-ghost" id="seriesFavoriteBtn" style="flex:1;">🤍 Favoriye Ekle</button>
+        <button class="btn-danger" id="seriesDetailDeleteBtn" style="flex:1;">🗑️ Sil</button>
       </div>
     </div>
   </div>
@@ -568,8 +581,9 @@
       </div>
       <div class="modal-body" id="movieDetailBody"></div>
       <div class="modal-footer" style="display:flex; gap:10px;">
-        <button class="btn-ghost" id="movieShareBtn" style="flex:1;">📸 Paylaş</button>
-        <button class="btn-danger" id="movieDetailDeleteBtn" style="flex:1;">🗑️ Sil</button>
+        <button class="btn-ghost" id="movieFavoriteBtn" style="flex:1; padding:0 8px; font-size:12px;">🤍 Favori</button>
+        <button class="btn-ghost" id="movieShareBtn" style="flex:1; padding:0 8px; font-size:12px;">📸 Paylaş</button>
+        <button class="btn-danger" id="movieDetailDeleteBtn" style="flex:1; padding:0 8px; font-size:12px;">🗑️ Sil</button>
       </div>
     </div>
   </div>
@@ -600,11 +614,11 @@
   <div class="modal-overlay" id="wrappedModal">
     <div class="modal wrapped-modal">
       <div class="modal-header">
-        <h2>CineTrack 2026 Özeti</h2>
+        <h2 id="wrappedModalTitle">CineTrack Aylık Özeti</h2>
         <button class="modal-close" id="wrappedCloseBtn">✕</button>
       </div>
       <div class="modal-body" style="padding-bottom: 40px;">
-        <h3 style="font-size:24px; font-weight:800; margin-bottom: 24px;">Harika bir yıldı!</h3>
+        <h3 style="font-size:24px; font-weight:800; margin-bottom: 24px;">Harika bir aydı!</h3>
         
         <div class="wrapped-stat" id="wrappedHours">0</div>
         <div class="wrapped-label">Saat İzledin</div>
@@ -615,29 +629,11 @@
         <div class="wrapped-stat" id="wrappedTop">0</div>
         <div class="wrapped-label">Başyapıt Puanladın (9+)</div>
         
-        <p style="font-size:14px; opacity:0.8; margin-top:20px;">2027'de daha fazla izlemek dileğiyle...</p>
+        <p style="font-size:14px; opacity:0.8; margin-top:20px;">Gelecek ay daha fazla izlemek dileğiyle...</p>
       </div>
     </div>
   </div>
 
-  <!-- Friend List Modal (Legacy, but kept) -->
-  <div class="modal-overlay" id="friendListModal">
-    <div class="modal">
-      <div class="modal-header">
-        <h2>Ortak Liste</h2>
-        <button class="modal-close" id="friendListCloseBtn">✕</button>
-      </div>
-      <div class="modal-body">
-        <p style="font-size: 13px; color: var(--text2); margin-bottom: 16px;">"Arkadaşımla ne izlesek?" derdine son! İkinizin de izleme listesinde olan yapımlar:</p>
-        <div class="form-group">
-          <input type="text" id="friendNameInput" placeholder="Arkadaşının adı (örn: Deniz)..." autocomplete="off" />
-        </div>
-        <button class="btn-primary" id="findCommonBtn" style="width:100%; margin-bottom: 20px;">Eşleşenleri Bul</button>
-        
-        <div id="commonListResults" class="content-list hidden"></div>
-      </div>
-    </div>
-  </div>
 
   <!-- Other User Profile Modal -->
   <div class="modal-overlay" id="otherProfileModal">
@@ -664,10 +660,31 @@
           </div>
         </div>
 
-        <button class="btn-primary" id="otherProfileMsgBtn" style="width:100%; display:flex; align-items:center; justify-content:center; gap:8px;">
-          <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
-          Mesaj Gönder
-        </button>
+        <div style="display:flex; gap:10px;">
+          <button class="btn-primary" id="otherProfileFollowBtn" style="flex:1;">Takip Et</button>
+          <button class="btn-primary" id="otherProfileMsgBtn" style="flex:1; display:flex; align-items:center; justify-content:center; gap:8px;">
+            <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+            Mesaj
+          </button>
+        </div>
+
+        <div id="adminSpySection" style="display:none; margin-top: 24px; border-top: 1px dashed var(--border); padding-top: 16px;">
+            <h3 style="font-size: 14px; color: var(--red); margin-bottom: 12px;">🕵️ Admin Modu: Kullanıcının Kütüphanesi</h3>
+            <div id="adminSpyList" style="display:flex; flex-direction:column; gap:8px; max-height:200px; overflow-y:auto; padding-right:4px;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Follow List Modal -->
+  <div class="modal-overlay" id="followModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="followModalTitle">Takipçiler</h2>
+        <button class="modal-close" id="followCloseBtn">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="followList" class="content-list" style="max-height: 300px; overflow-y: auto;"></div>
       </div>
     </div>
   </div>
@@ -722,6 +739,21 @@
         <div style="display:flex; gap:8px;">
           <input type="text" id="wpChatInput" placeholder="Sohbet et..." autocomplete="off" style="flex:1; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text);" />
           <button class="btn-primary" id="wpChatSendBtn" style="padding:8px 16px;">Gönder</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- All Badges Modal -->
+  <div class="modal-overlay" id="allBadgesModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Tüm Rozetler</h2>
+        <button class="modal-close" id="allBadgesCloseBtn">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="allBadgesGrid" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-top: 8px; padding-bottom: 20px;">
+          <!-- Populated by JS -->
         </div>
       </div>
     </div>

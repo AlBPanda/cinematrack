@@ -166,6 +166,12 @@ const App = {
         if (profileUserName) {
             profileUserName.innerHTML = `${userRecord.name} <span style="font-size:14px; opacity:0.8; font-weight:normal;">@${userRecord.handle}</span>`;
         }
+
+        // Easter Egg: 'deniz'
+        const denizThemeBtn = document.getElementById('themeDeniz');
+        if (denizThemeBtn) {
+            denizThemeBtn.style.display = this.currentUser === 'deniz' ? 'flex' : 'none';
+        }
         
         // Data Migration / Loading
         if (!localStorage.getItem('cinetrack_migrated') && localStorage.getItem('cinetrack_movies')) {
@@ -188,10 +194,13 @@ const App = {
             this.state.streak = parseInt(localStorage.getItem(`cinetrack_${this.currentUser}_streak`)) || 0;
             this.state.lastWatchDate = localStorage.getItem(`cinetrack_${this.currentUser}_lastWatchDate`) || null;
         }
+        
+        this.state.following = JSON.parse(localStorage.getItem(`cinetrack_${this.currentUser}_following`)) || [];
 
         checkGoalWeek();
         if (!this.eventsBound) {
             this.bindEvents();
+            this.startClock();
             this.eventsBound = true;
         }
         this.renderAll();
@@ -213,6 +222,21 @@ const App = {
             savedTheme = (this.currentUser === 'deniz') ? 'deniz' : 'default';
         }
         this.changeTheme(savedTheme, false);
+    },
+
+    startClock() {
+        const updateClock = () => {
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+            const dateStr = now.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' });
+            
+            const clockEl = document.getElementById('liveClock');
+            const dateEl = document.getElementById('liveDate');
+            if (clockEl) clockEl.innerText = timeStr;
+            if (dateEl) dateEl.innerText = dateStr;
+        };
+        updateClock();
+        setInterval(updateClock, 1000);
     },
 
     changeTheme(theme, showToast = true) {
@@ -287,6 +311,7 @@ const App = {
         localStorage.setItem(`cinetrack_${this.currentUser}_goal_current`, this.state.goalCurrent);
         localStorage.setItem(`cinetrack_${this.currentUser}_goal_week`, this.state.goalWeek);
         localStorage.setItem(`cinetrack_${this.currentUser}_streak`, this.state.streak);
+        localStorage.setItem(`cinetrack_${this.currentUser}_following`, JSON.stringify(this.state.following));
         if(this.state.lastWatchDate) localStorage.setItem(`cinetrack_${this.currentUser}_lastWatchDate`, this.state.lastWatchDate);
     },
 
@@ -455,22 +480,28 @@ const App = {
         document.getElementById('movieDetailCloseBtn').addEventListener('click', () => this.closeModals());
         document.getElementById('seriesDetailCloseBtn').addEventListener('click', () => this.closeModals());
 
-        // V1.4 New Modals & Actions
         if(document.getElementById('shareCloseBtn')) document.getElementById('shareCloseBtn').addEventListener('click', () => this.closeModals());
         if(document.getElementById('wrappedCloseBtn')) document.getElementById('wrappedCloseBtn').addEventListener('click', () => this.closeModals());
-        if(document.getElementById('friendListCloseBtn')) document.getElementById('friendListCloseBtn').addEventListener('click', () => this.closeModals());
         if(document.getElementById('btnWrapped')) document.getElementById('btnWrapped').addEventListener('click', () => this.showWrapped());
-        if(document.getElementById('btnFriendList')) document.getElementById('btnFriendList').addEventListener('click', () => this.openFriendList());
-        if(document.getElementById('findCommonBtn')) document.getElementById('findCommonBtn').addEventListener('click', () => this.findCommonMovies());
+        if(document.getElementById('allBadgesCloseBtn')) document.getElementById('allBadgesCloseBtn').addEventListener('click', () => this.closeModals());
+        if(document.getElementById('btnAllBadges')) document.getElementById('btnAllBadges').addEventListener('click', () => {
+            this.renderAllBadgesModal();
+            document.getElementById('allBadgesModal').classList.add('open');
+        });
         if(document.getElementById('movieShareBtn')) document.getElementById('movieShareBtn').addEventListener('click', () => this.openShareCard('movie'));
 
         // Detail Actions
         document.getElementById('movieDetailDeleteBtn').addEventListener('click', () => this.deleteItem('movie'));
         document.getElementById('seriesDetailDeleteBtn').addEventListener('click', () => this.deleteItem('series'));
+        if(document.getElementById('movieFavoriteBtn')) document.getElementById('movieFavoriteBtn').addEventListener('click', () => this.toggleFavorite('movie'));
+        if(document.getElementById('seriesFavoriteBtn')) document.getElementById('seriesFavoriteBtn').addEventListener('click', () => this.toggleFavorite('series'));
 
         // V1.5 Beta Social & Chat
         if (document.getElementById('otherProfileCloseBtn')) document.getElementById('otherProfileCloseBtn').addEventListener('click', () => this.closeModals());
+        if (document.getElementById('followCloseBtn')) document.getElementById('followCloseBtn').addEventListener('click', () => this.closeModals());
+        if (document.getElementById('otherProfileFollowBtn')) document.getElementById('otherProfileFollowBtn').addEventListener('click', () => this.toggleFollow());
         if (document.getElementById('chatCloseBtn')) document.getElementById('chatCloseBtn').addEventListener('click', () => this.closeModals());
+        if (document.getElementById('deleteAccountBtn')) document.getElementById('deleteAccountBtn').addEventListener('click', () => this.deleteAccount());
         if (document.getElementById('socialSearchInput')) {
             document.getElementById('socialSearchInput').addEventListener('input', (e) => {
                 this.renderSocialTab(e.target.value.trim().toLowerCase());
@@ -910,6 +941,10 @@ const App = {
         // Badges & Streak
         document.getElementById('statStreak').innerHTML = `🔥 ${this.state.streak}`;
         
+        if (document.getElementById('statFollowing')) {
+            document.getElementById('statFollowing').innerText = (this.state.following || []).length;
+        }
+        
         let earnedBadges = [];
         if (this.state.movies.length > 0 || this.state.series.length > 0) {
             earnedBadges.push({ icon: '👶', name: 'Yeni Kan', desc: 'İlk içerik eklendi' });
@@ -930,12 +965,13 @@ const App = {
 
         document.getElementById('statBadgeCount').innerText = earnedBadges.length;
 
+        const maxDisplayBadges = earnedBadges.slice(0, 3);
         const badgesList = document.getElementById('badgesList');
         if (earnedBadges.length === 0) {
             badgesList.innerHTML = `<div class="empty-widget" style="width:100%; text-align:center;">Henüz rozet kazanılmadı</div>`;
         } else {
-            badgesList.innerHTML = earnedBadges.map(b => `
-                <div style="background:var(--bg2); padding:12px; border-radius:12px; border:1px solid var(--border); min-width:120px; text-align:center; display:flex; flex-direction:column; align-items:center; gap:4px;">
+            badgesList.innerHTML = maxDisplayBadges.map(b => `
+                <div style="background:var(--bg2); padding:12px; border-radius:12px; border:1px solid var(--border); min-width:110px; flex:1; text-align:center; display:flex; flex-direction:column; align-items:center; gap:4px;">
                     <span style="font-size:24px;">${b.icon}</span>
                     <span style="font-size:13px; font-weight:600;">${b.name}</span>
                     <span style="font-size:10px; color:var(--text3);">${b.desc}</span>
@@ -1227,7 +1263,12 @@ const App = {
                         ${badge}
                     </div>
                     <div class="movie-info">
-                        <div class="movie-title">${m.title} ${platformBadge}</div>
+                        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom: 2px;">
+                            <div class="movie-title" style="margin-bottom:0;">${m.title} ${platformBadge}</div>
+                            <div onclick="event.stopPropagation(); App.toggleFavoriteFromGrid('${m.id}', 'movie')" style="font-size: 16px; cursor: pointer; transition: transform 0.2s; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));" onmouseover="this.style.transform='scale(1.2)'" onmouseout="this.style.transform='scale(1)'">
+                                ${m.favorite ? '❤️' : '🤍'}
+                            </div>
+                        </div>
                         <div class="movie-year">${m.year || ''} ${m.genre ? `• ${m.genre}` : ''}</div>
                         ${starHtml}
                     </div>
@@ -1329,7 +1370,12 @@ const App = {
                         ${statusTag}
                     </div>
                     <div class="series-meta">
-                        <div class="series-title">${s.title} ${platformBadge}</div>
+                        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom: 2px;">
+                            <div class="series-title" style="margin-bottom:0;">${s.title} ${platformBadge}</div>
+                            <div onclick="event.stopPropagation(); App.toggleFavoriteFromGrid('${s.id}', 'series')" style="font-size: 16px; cursor: pointer; transition: transform 0.2s; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));" onmouseover="this.style.transform='scale(1.2)'" onmouseout="this.style.transform='scale(1)'">
+                                ${s.favorite ? '❤️' : '🤍'}
+                            </div>
+                        </div>
                         <div class="series-year">${s.year || ''} ${s.genre ? `• ${s.genre}` : ''}</div>
                         ${starHtml}
                         <div class="series-prog-wrap">
@@ -1409,6 +1455,10 @@ const App = {
         `;
         
         document.getElementById('movieDetailBody').innerHTML = body;
+        const favBtn = document.getElementById('movieFavoriteBtn');
+        if (favBtn) {
+            favBtn.innerText = m.favorite ? '❤️ Favoriden Çıkar' : '🤍 Favori';
+        }
         document.getElementById('movieDetailModal').classList.add('open');
     },
 
@@ -1492,6 +1542,10 @@ const App = {
         `;
         
         document.getElementById('seriesDetailBody').innerHTML = body;
+        const favBtn = document.getElementById('seriesFavoriteBtn');
+        if (favBtn) {
+            favBtn.innerText = s.favorite ? '❤️ Favoriden Çıkar' : '🤍 Favoriye Ekle';
+        }
         document.getElementById('seriesDetailModal').classList.add('open');
     },
 
@@ -1667,6 +1721,12 @@ const App = {
             }
         }
 
+        const date = new Date();
+        const monthNames = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"];
+        const monthName = monthNames[date.getMonth()];
+        const year = date.getFullYear();
+        document.getElementById('wrappedModalTitle').innerText = `CineTrack ${monthName} ${year} Özeti`;
+
         document.getElementById('wrappedHours').innerText = Math.round(totalHours);
         document.getElementById('wrappedGenre').innerText = topGenre;
         document.getElementById('wrappedTop').innerText = topRatedCount;
@@ -1676,6 +1736,44 @@ const App = {
         if (window.confetti) {
             confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
         }
+    },
+
+    renderAllBadgesModal() {
+        const allPossibleBadges = [
+            { id: 'b1', icon: '👶', name: 'Yeni Kan', desc: 'İlk içerik eklendi' },
+            { id: 'b2', icon: '🍿', name: 'Sinema Kurdu', desc: '10 film izlendi' },
+            { id: 'b3', icon: '👑', name: 'Film Gurmesi', desc: '50 film izlendi' },
+            { id: 'b4', icon: '📺', name: 'Dizi Kolik', desc: '20 bölüm izlendi' },
+            { id: 'b5', icon: '⭐', name: 'Eleştirmen', desc: '10 yapıma puan verildi' },
+            { id: 'b6', icon: '🔥', name: 'İstikrarlı', desc: '7 günlük giriş serisi' }
+        ];
+
+        const watchedMovies = this.state.movies.filter(m => m.status === 'watched').length;
+        let totalEps = 0;
+        this.state.series.forEach(s => { if (s.watchedEps) totalEps += s.watchedEps.length; });
+        const ratedCount = [...this.state.movies, ...this.state.series].filter(x => x.rating > 0).length;
+
+        const earnedIds = new Set();
+        if (this.state.movies.length > 0 || this.state.series.length > 0) earnedIds.add('b1');
+        if (watchedMovies >= 10) earnedIds.add('b2');
+        if (watchedMovies >= 50) earnedIds.add('b3');
+        if (totalEps >= 20) earnedIds.add('b4');
+        if (ratedCount >= 10) earnedIds.add('b5');
+        if (this.state.streak >= 7) earnedIds.add('b6');
+
+        const grid = document.getElementById('allBadgesGrid');
+        grid.innerHTML = allPossibleBadges.map(b => {
+            const isEarned = earnedIds.has(b.id);
+            const opacity = isEarned ? '1' : '0.4';
+            const filter = isEarned ? 'none' : 'grayscale(100%)';
+            return `
+                <div style="background:var(--bg2); padding:16px 12px; border-radius:12px; border:1px solid var(--border); text-align:center; display:flex; flex-direction:column; align-items:center; gap:6px; opacity:${opacity}; filter:${filter}; transition: all 0.3s;">
+                    <span style="font-size:32px;">${b.icon}</span>
+                    <span style="font-size:14px; font-weight:700; color:var(--text);">${b.name}</span>
+                    <span style="font-size:11px; color:var(--text3);">${b.desc}</span>
+                </div>
+            `;
+        }).join('');
     },
 
     openFriendList() {
@@ -2093,6 +2191,39 @@ const App = {
             this.openChat(handle);
         };
 
+        const followBtn = document.getElementById('otherProfileFollowBtn');
+        if (followBtn) {
+            if (this.state.following.includes(handle)) {
+                followBtn.innerText = 'Takibi Bırak';
+                followBtn.classList.remove('btn-primary');
+                followBtn.classList.add('btn-ghost');
+            } else {
+                followBtn.innerText = 'Takip Et';
+                followBtn.classList.remove('btn-ghost');
+                followBtn.classList.add('btn-primary');
+            }
+        }
+        this.currentViewProfile = handle;
+
+        // Easter Egg: 'kermode' Admin Mode
+        const adminSpySection = document.getElementById('adminSpySection');
+        const adminSpyList = document.getElementById('adminSpyList');
+        if (adminSpySection && adminSpyList) {
+            if (this.currentUser === 'kermode') {
+                adminSpySection.style.display = 'block';
+                let listHtml = '';
+                theirMovies.forEach(m => {
+                    listHtml += `<div style="font-size:12px; color:var(--text); background:var(--bg3); padding:8px; border-radius:6px; border:1px solid var(--border);">🎬 ${m.title} <span style="float:right; color:var(--text3);">${m.status}</span></div>`;
+                });
+                theirSeries.forEach(s => {
+                    listHtml += `<div style="font-size:12px; color:var(--text); background:var(--bg3); padding:8px; border-radius:6px; border:1px solid var(--border);">📺 ${s.title} <span style="float:right; color:var(--text3);">${s.status}</span></div>`;
+                });
+                adminSpyList.innerHTML = listHtml || '<div style="font-size:12px; color:var(--text3); text-align:center;">Kütüphanesi boş.</div>';
+            } else {
+                adminSpySection.style.display = 'none';
+            }
+        }
+
         document.getElementById('otherProfileModal').classList.add('open');
     },
 
@@ -2176,6 +2307,121 @@ const App = {
         input.value = '';
         this.renderMessages();
         if (this.currentTab === 'social') this.renderSocialTab();
+    },
+
+    toggleFollow() {
+        if (!this.currentViewProfile) return;
+        const idx = this.state.following.indexOf(this.currentViewProfile);
+        if (idx > -1) {
+            this.state.following.splice(idx, 1);
+            this.showToast('Takipten çıkıldı');
+        } else {
+            this.state.following.push(this.currentViewProfile);
+            this.showToast('Takip ediliyor');
+        }
+        this.save();
+        this.openOtherProfile(this.currentViewProfile);
+        this.renderProfileStats(); // update count
+    },
+
+    toggleFavorite(type) {
+        const arr = type === 'movie' ? this.state.movies : this.state.series;
+        const item = arr.find(x => x.id === this.editingId);
+        if (item) {
+            item.favorite = !item.favorite;
+            this.save();
+            this.showToast(item.favorite ? 'Favorilere eklendi' : 'Favorilerden çıkarıldı');
+            
+            if (type === 'movie') {
+                const favBtn = document.getElementById('movieFavoriteBtn');
+                if (favBtn) favBtn.innerText = item.favorite ? '❤️ Favoriden Çıkar' : '🤍 Favori';
+                this.renderMovies();
+            } else {
+                const favBtn = document.getElementById('seriesFavoriteBtn');
+                if (favBtn) favBtn.innerText = item.favorite ? '❤️ Favoriden Çıkar' : '🤍 Favoriye Ekle';
+                this.renderSeries();
+            }
+        }
+    },
+
+    toggleFavoriteFromGrid(id, type) {
+        const arr = type === 'movie' ? this.state.movies : this.state.series;
+        const item = arr.find(x => x.id === id);
+        if (item) {
+            item.favorite = !item.favorite;
+            this.save();
+            this.showToast(item.favorite ? 'Favorilere eklendi' : 'Favorilerden çıkarıldı');
+            
+            if (type === 'movie') {
+                this.renderMovies();
+            } else {
+                this.renderSeries();
+            }
+        }
+    },
+
+    openFollowModal(type) {
+        const title = document.getElementById('followModalTitle');
+        const list = document.getElementById('followList');
+        list.innerHTML = '';
+        
+        if (type === 'following') {
+            title.innerText = 'Takip Ettiklerin';
+            if (this.state.following.length === 0) {
+                list.innerHTML = '<div class="empty-widget">Henüz kimseyi takip etmiyorsun.</div>';
+            } else {
+                list.innerHTML = this.state.following.map(handle => {
+                    const u = this.state.globalUsers.find(x => x.handle === handle);
+                    if (!u) return '';
+                    return `
+                    <div class="user-card" onclick="App.closeModals(); App.openOtherProfile('${u.handle}')" style="background:var(--bg2); padding:12px; border-radius:8px; border:1px solid var(--border); margin-bottom:8px; cursor:pointer; display:flex; gap:12px; align-items:center;">
+                        <div style="font-size:24px;">${u.avatar || '👨'}</div>
+                        <div>
+                            <div style="font-size:14px; font-weight:bold;">${u.name}</div>
+                            <div style="font-size:12px; color:var(--text2);">@${u.handle}</div>
+                        </div>
+                    </div>
+                    `;
+                }).join('');
+            }
+        } else {
+            title.innerText = 'Takipçilerin';
+            list.innerHTML = '<div class="empty-widget">Online özellikler aktifleştiğinde takipçilerin burada görünecek.</div>';
+        }
+        
+        document.getElementById('followModal').classList.add('open');
+    },
+
+    deleteAccount() {
+        if (!this.currentUser) return;
+        
+        const confirmDelete = confirm('Hesabınızı kalıcı olarak silmek istediğinize emin misiniz? Bu işlem geri alınamaz ve kullanıcı adınız başkaları tarafından alınabilir.');
+        if (!confirmDelete) return;
+
+        // Remove from global users
+        let users = JSON.parse(localStorage.getItem('cinetrack_global_users')) || [];
+        users = users.filter(u => u.handle !== this.currentUser);
+        localStorage.setItem('cinetrack_global_users', JSON.stringify(users));
+
+        // Remove all user specific items
+        const prefix = `cinetrack_${this.currentUser}_`;
+        const keysToRemove = [];
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key.startsWith(prefix)) {
+                keysToRemove.push(key);
+            }
+        }
+        
+        keysToRemove.forEach(key => localStorage.removeItem(key));
+
+        // Clean up messages
+        let msgs = JSON.parse(localStorage.getItem('cinetrack_global_messages')) || [];
+        msgs = msgs.filter(m => m.sender !== this.currentUser && m.receiver !== this.currentUser);
+        localStorage.setItem('cinetrack_global_messages', JSON.stringify(msgs));
+
+        alert('Hesabınız başarıyla silindi.');
+        this.logout();
     }
 };
 
