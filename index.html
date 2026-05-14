@@ -747,30 +747,75 @@
     </div>
   </div>
 
-  <!-- Watch Party Modal -->
+  <!-- Watch Party Modal — v2.0 -->
   <div class="modal-overlay" id="watchPartyModal" style="z-index: 2000;">
-    <div class="modal" style="display:flex; flex-direction:column; padding:0;">
-      <div class="modal-header" style="border-bottom: 1px solid var(--border); padding: 16px; background: var(--bg2); border-radius: 16px 16px 0 0;">
-        <h2 style="font-size:18px;">🍿 Watch Party Odası</h2>
-        <button class="modal-close" id="watchPartyCloseBtn" style="position:static;">✕</button>
+    <div class="modal wp-modal" style="display:flex; flex-direction:column; padding:0; height:90vh; max-height:860px; overflow:hidden;">
+
+      <!-- Header -->
+      <div class="wp-modal-header">
+        <div id="wpRoomHeader" style="flex:1; min-width:0;">
+          <div style="font-weight:700; font-size:15px; color:var(--text);">🍿 Ortak İzleme</div>
+          <div style="font-size:11px; color:var(--text2);">Bağlanılıyor...</div>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <button id="wpClosePartyBtn" title="Odadan Çık" style="background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.3); color:var(--red); border-radius:8px; padding:5px 10px; cursor:pointer; font-size:11px; font-weight:700;">🚪 Çıkış</button>
+          <button class="modal-close" id="watchPartyCloseBtn" style="position:static;">✕</button>
+        </div>
       </div>
-      <div class="modal-body" style="padding: 16px; display:flex; flex-direction:column; gap:16px;">
-        <div style="background: #000; border-radius: 8px; aspect-ratio: 16/9; display:flex; align-items:center; justify-content:center; position:relative;">
-          <span style="color:#555;">Video Oynatıcı Bekleniyor...</span>
-          <div style="position:absolute; bottom: 10px; left: 10px; background: rgba(0,0,0,0.7); padding:4px 8px; border-radius:4px; font-family:monospace; color:var(--primary);">
-            <span id="watchTimer">00:00:00</span>
-          </div>
+
+      <!-- Seçili İçerik + Oynatıcı -->
+      <div class="wp-content-section" style="overflow-y:auto; max-height:340px;">
+        <div id="wpContentArea" style="padding:12px 16px;">
+          <div style="text-align:center; color:var(--text3); font-size:13px; padding:16px 0;">⏳ Yükleniyor...</div>
         </div>
-        <div style="display:flex; gap:10px;">
-          <button class="btn-primary" id="btnSyncTimer" style="flex:1;">▶️ Başlat / Senkronize Et</button>
+      </div>
+
+      <!-- Oynatıcı Kontrolleri -->
+      <div class="wp-player-section">
+        <div class="wp-timer-display">
+          <span id="watchTimer" style="font-family:monospace; font-size:22px; font-weight:800; letter-spacing:2px; color:var(--text);">00:00</span>
         </div>
-        <div style="border: 1px solid var(--border); border-radius:8px; height: 150px; overflow-y:auto; padding:8px; display:flex; flex-direction:column; gap:8px;" id="watchPartyChat">
-          <div style="font-size:12px; color:var(--text3); text-align:center;">Odaya katıldınız. Arkadaşlarınızı bekleyin.</div>
+
+        <!-- Host Kontrolleri -->
+        <div id="wpHostControls" class="wp-host-controls" style="display:none;">
+          <button id="wpPlayBtn" class="wp-play-btn" title="Oynat / Duraklat">
+            <svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><polygon points="5,3 19,12 5,21"/></svg>
+          </button>
+          <div style="font-size:11px; color:var(--text2); text-align:center; margin-top:2px;">Tüm üyeler için senkronize oynatır</div>
         </div>
-        <div style="display:flex; gap:8px;">
-          <input type="text" id="wpChatInput" placeholder="Sohbet et..." autocomplete="off" style="flex:1; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text);" />
-          <button class="btn-primary" id="wpChatSendBtn" style="padding:8px 16px;">Gönder</button>
+
+        <!-- Misafir Bildirimi -->
+        <div id="wpGuestNotice" style="display:flex; align-items:center; justify-content:center; gap:6px; padding:6px 12px; background:rgba(0,0,0,0.2); border-radius:10px; width:100%;">
+          <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <span style="font-size:11px; color:var(--text2);">Oynatma kontrolü host'a ait</span>
         </div>
+      </div>
+
+      <!-- Live Chat -->
+      <div class="wp-chat-section">
+        <div id="watchPartyChat" class="wp-chat-box">
+          <!-- Mesajlar buraya gelir -->
+        </div>
+        <div class="wp-chat-input-row">
+          <input type="text" id="wpChatInput" class="wp-chat-input" placeholder="Mesaj yaz..." autocomplete="off" />
+          <button class="wp-chat-send" id="wpChatSendBtn">
+            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Watch Party Content Picker Modal — v2.0 -->
+  <div class="modal-overlay" id="wpContentPickerModal" style="z-index: 2100; display:none;">
+    <div class="modal" style="display:flex; flex-direction:column; max-height:85vh; padding:0; overflow:hidden;">
+      <div class="modal-header" style="padding:16px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
+        <h2 style="font-size:16px; margin:0;">🎬 İzlenecek İçerik Seç</h2>
+        <button class="modal-close" id="wpContentPickerCloseBtn" style="position:static;">✕</button>
+      </div>
+      <div class="modal-body" id="wpContentPickerList" style="overflow-y:auto; padding:16px;">
+        <!-- JS ile doldurulur -->
       </div>
     </div>
   </div>

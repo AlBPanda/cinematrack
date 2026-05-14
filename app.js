@@ -674,17 +674,20 @@ const App = {
 
         // Watch Party Event Binding
         if (document.getElementById('btnCreateWatchParty')) document.getElementById('btnCreateWatchParty').addEventListener('click', () => this.createWatchParty());
-        if (document.getElementById('btnJoinWatchParty')) document.getElementById('btnJoinWatchParty').addEventListener('click', () => this.joinWatchParty());
-        if (document.getElementById('watchPartyCloseBtn')) document.getElementById('watchPartyCloseBtn').addEventListener('click', () => {
-            document.getElementById('watchPartyModal').style.display = 'none';
-            if (this.watchPartyUnsubscribe) this.watchPartyUnsubscribe();
-            if (this.watchPartyChatUnsubscribe) this.watchPartyChatUnsubscribe();
-            this.currentWatchPartyId = null;
+        if (document.getElementById('btnJoinWatchParty')) document.getElementById('btnJoinWatchParty').addEventListener('click', () => {
+            const code = prompt('Katılmak istediğin oda kodunu gir:');
+            if (code) this.openWatchPartyRoom(code.trim());
         });
-        if (document.getElementById('btnSyncTimer')) document.getElementById('btnSyncTimer').addEventListener('click', () => this.toggleWatchPartyState());
+        if (document.getElementById('watchPartyCloseBtn')) document.getElementById('watchPartyCloseBtn').addEventListener('click', () => this._closeWpModal());
+        if (document.getElementById('wpClosePartyBtn')) document.getElementById('wpClosePartyBtn').addEventListener('click', () => this.closeWatchParty());
+        if (document.getElementById('wpPlayBtn')) document.getElementById('wpPlayBtn').addEventListener('click', () => this.toggleWatchPartyState());
         if (document.getElementById('wpChatSendBtn')) document.getElementById('wpChatSendBtn').addEventListener('click', () => this.sendWatchPartyMessage());
         if (document.getElementById('wpChatInput')) document.getElementById('wpChatInput').addEventListener('keypress', (e) => {
             if (e.key === 'Enter') this.sendWatchPartyMessage();
+        });
+        if (document.getElementById('wpContentPickerCloseBtn')) document.getElementById('wpContentPickerCloseBtn').addEventListener('click', () => {
+            document.getElementById('wpContentPickerModal').classList.remove('open');
+            document.getElementById('wpContentPickerModal').style.display = 'none';
         });
 
         // Filters
@@ -807,8 +810,16 @@ const App = {
         const userLang = navigator.language || 'tr-TR';
 
         try {
-            const res = await fetch(`https://api.themoviedb.org/3/${endpoint}/${id}?api_key=${TMDB_API_KEY}&language=${userLang}&append_to_response=credits`);
-            const data = await res.json();
+            // Ana detay + IMDb ID'sini aynı anda çek
+            const [detailRes, externalRes] = await Promise.all([
+                fetch(`https://api.themoviedb.org/3/${endpoint}/${id}?api_key=${TMDB_API_KEY}&language=${userLang}&append_to_response=credits`),
+                fetch(`https://api.themoviedb.org/3/${endpoint}/${id}/external_ids?api_key=${TMDB_API_KEY}`)
+            ]);
+            const data = await detailRes.json();
+            const extData = await externalRes.json();
+
+            // IMDb ID'yi sakla
+            this.tempImdbId = extData.imdb_id || null;
 
             const title = type === 'movie' ? data.title : data.name;
             const dateField = type === 'movie' ? data.release_date : data.first_air_date;
@@ -844,7 +855,7 @@ const App = {
             }
 
             resultsContainer.classList.add('hidden');
-            this.showToast('Bilgiler otomatik dolduruldu!');
+            this.showToast(this.tempImdbId ? `✅ Bilgiler dolduruldu (IMDb: ${this.tempImdbId})` : 'Bilgiler otomatik dolduruldu!');
 
         } catch (err) {
             resultsContainer.innerHTML = '<div class="tmdb-loading">Detaylar alınamadı.</div>';
@@ -872,6 +883,7 @@ const App = {
         document.getElementById('formSeasons').value = '1';
         document.getElementById('formEpisodes').value = '1';
         this.tempSeasonsData = null;
+        this.tempImdbId = null;
 
         document.querySelector(`.type-btn[data-type="${type}"]`).click();
         
@@ -949,8 +961,10 @@ const App = {
             note: document.getElementById('formNote').value,
             platform: document.getElementById('formPlatform').value,
             globalRating: document.getElementById('formGlobalRating').value,
+            imdbId: this.tempImdbId || null,
             updatedAt: Date.now()
         };
+        this.tempImdbId = null; // reset
 
         if (type === 'movie') {
             const status = document.getElementById('formMovieStatus').value;
@@ -1116,6 +1130,27 @@ const App = {
         
         if (document.getElementById('statFollowing')) {
             document.getElementById('statFollowing').innerText = (this.state.following || []).length;
+        }
+        if (document.getElementById('statFollowers')) {
+            document.getElementById('statFollowers').innerText = (this.state.followers || []).length;
+        }
+
+        // Kütüphane İstatistikleri (Profile Tab)
+        if (document.getElementById('statMoviesWatched')) {
+            document.getElementById('statMoviesWatched').innerText = this.state.movies.filter(m => m.status === 'watched').length;
+        }
+        if (document.getElementById('statMoviesWatchlist')) {
+            document.getElementById('statMoviesWatchlist').innerText = this.state.movies.filter(m => m.status === 'watchlist').length;
+        }
+        if (document.getElementById('statSeriesTotal')) {
+            document.getElementById('statSeriesTotal').innerText = this.state.series.length;
+        }
+        if (document.getElementById('statEpsWatched')) {
+            let totalEps = 0;
+            this.state.series.forEach(s => {
+                if (s.watchedEps) totalEps += s.watchedEps.length;
+            });
+            document.getElementById('statEpsWatched').innerText = totalEps;
         }
         
         let earnedBadges = [];
@@ -2332,110 +2367,631 @@ const App = {
     },
 
     // ==========================================
-    // WATCH PARTY INTEGRATION
+    // WATCH PARTY — YENİDEN YAZILDI v2.0
     // ==========================================
 
+    // Sadece takipçilere görünen odaları listele
     renderActiveWatchParties() {
         const list = document.getElementById('activeWatchPartiesList');
         if (!list || !db) return;
 
-        if (this.watchPartiesListUnsubscribe) return; // already listening
+        if (this.watchPartiesListUnsubscribe) {
+            this.watchPartiesListUnsubscribe();
+            this.watchPartiesListUnsubscribe = null;
+        }
+
+        const myFollowers = this.state.followers || [];
+        const myFollowing = this.state.following || [];
+        // Benim görebileceğim odalar: host'un benim takipçim veya takip ettiğim biri olması
+        const visibleHosts = [...new Set([...myFollowers, ...myFollowing, this.currentUser])];
 
         this.watchPartiesListUnsubscribe = db.collection('watchparties')
-            .orderBy('createdAt', 'desc').limit(5)
+            .where('status', '==', 'open')
+            .orderBy('createdAt', 'desc').limit(20)
             .onSnapshot(snap => {
-                if (snap.empty) {
-                    list.innerHTML = '<div style="font-size:11px; color:var(--text3); text-align:center;">Şu an aktif oda yok. İlk oluşturan sen ol!</div>';
-                    return;
-                }
+                const myPendingReqs = [];
                 let html = '';
+                let count = 0;
+
                 snap.forEach(doc => {
                     const p = doc.data();
+                    // Sadece takipçi/takip ağındaki host'ların odaları
+                    if (!visibleHosts.includes(p.host)) return;
+                    count++;
+
+                    const isHost = p.host === this.currentUser;
+                    const members = p.members || [];
+                    const pendingJoins = p.pendingJoins || [];
+                    const isMember = members.includes(this.currentUser);
+                    const isPending = pendingJoins.includes(this.currentUser);
+
+                    let actionBtn = '';
+                    if (isHost) {
+                        actionBtn = `<button onclick="App.openWatchPartyRoom('${doc.id}')" 
+                            style="padding:5px 12px; font-size:11px; border-radius:8px; background:var(--primary); color:white; border:none; cursor:pointer; font-weight:bold; white-space:nowrap;">
+                            Odayı Aç
+                        </button>`;
+                    } else if (isMember) {
+                        actionBtn = `<button onclick="App.openWatchPartyRoom('${doc.id}')" 
+                            style="padding:5px 12px; font-size:11px; border-radius:8px; background:var(--green); color:white; border:none; cursor:pointer; font-weight:bold; white-space:nowrap;">
+                            Geri Dön
+                        </button>`;
+                    } else if (isPending) {
+                        actionBtn = `<button disabled 
+                            style="padding:5px 12px; font-size:11px; border-radius:8px; background:var(--bg3); color:var(--text2); border:1px solid var(--border); cursor:default; font-weight:bold; white-space:nowrap;">
+                            Onay Bekleniyor...
+                        </button>`;
+                    } else {
+                        actionBtn = `<button onclick="App.requestJoinWatchParty('${doc.id}', '${p.host}')" 
+                            style="padding:5px 12px; font-size:11px; border-radius:8px; background:var(--primary); color:white; border:none; cursor:pointer; font-weight:bold; white-space:nowrap;">
+                            Katılmak İste
+                        </button>`;
+                    }
+
+                    // Pending join istekleri — sadece host'a göster
+                    let pendingSection = '';
+                    if (isHost && pendingJoins.length > 0) {
+                        const pendingBtns = pendingJoins.map(handle => {
+                            const u = this.state.globalUsers.find(x => x.handle === handle) || { handle, avatar: '👤' };
+                            return `<span style="display:inline-flex; align-items:center; gap:4px; background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:3px 8px; font-size:11px; margin:2px;">
+                                ${u.avatar} @${handle}
+                                <button onclick="App.approveJoinRequest('${doc.id}','${handle}')" style="background:var(--green); color:white; border:none; border-radius:4px; padding:1px 5px; cursor:pointer; font-size:10px;">✓</button>
+                                <button onclick="App.denyJoinRequest('${doc.id}','${handle}')" style="background:var(--red); color:white; border:none; border-radius:4px; padding:1px 5px; cursor:pointer; font-size:10px;">✗</button>
+                            </span>`;
+                        }).join('');
+                        pendingSection = `<div style="margin-top:6px; font-size:10px; color:var(--amber); font-weight:bold;">⏳ Katılmak İsteyenler:</div><div style="margin-top:4px;">${pendingBtns}</div>`;
+                    }
+
+                    const contentLabel = p.selectedContent 
+                        ? `🎬 ${p.selectedContent.title}` 
+                        : '🎬 İçerik seçilmedi';
+
                     html += `
-                    <div style="display:flex; align-items:center; justify-content:space-between; background:var(--bg); padding:8px 12px; border-radius:8px; border:1px solid var(--border);">
-                        <div style="min-width:0;">
-                            <div style="font-size:12px; font-weight:bold; color:var(--primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">🍿 Oda: ${p.roomName || doc.id}</div>
-                            <div style="font-size:10px; color:var(--text2);">Kurucu: @${p.host}</div>
+                    <div style="background:var(--bg); padding:10px 12px; border-radius:12px; border:1px solid var(--border); margin-bottom:8px;">
+                        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+                            <div style="min-width:0; flex:1;">
+                                <div style="font-size:12px; font-weight:bold; color:var(--primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">🍿 ${p.roomName}</div>
+                                <div style="font-size:10px; color:var(--text2);">Kurucu: @${p.host} · ${members.length} üye</div>
+                                <div style="font-size:10px; color:var(--text3); margin-top:2px;">${contentLabel}</div>
+                            </div>
+                            ${actionBtn}
                         </div>
-                        <button onclick="App.joinWatchParty('${doc.id}')" style="padding:4px 10px; font-size:11px; border-radius:6px; background:var(--primary); color:white; border:none; cursor:pointer; font-weight:bold;">Katıl</button>
+                        ${pendingSection}
                     </div>`;
                 });
-                list.innerHTML = html;
+
+                if (count === 0) {
+                    list.innerHTML = '<div style="font-size:11px; color:var(--text3); text-align:center; padding:8px;">Takipçi ağında aktif oda yok. İlk sen başlat!</div>';
+                } else {
+                    list.innerHTML = html;
+                }
+            }, err => {
+                // Firestore index eksikse daha basit sorgu dene
+                list.innerHTML = '<div style="font-size:11px; color:var(--amber); text-align:center; padding:8px;">⚠️ Odalar yüklenemedi. Firestore index gerekebilir.</div>';
             });
     },
 
     async createWatchParty() {
         if (!db || !this.currentUser) return;
-        const roomName = prompt('Ortak İzleme Odası için bir isim girin:', `${this.currentUser} Odası`);
+
+        // Önce oda ismi sor
+        const roomName = prompt('Ortak İzleme Odası için bir isim girin:', `${this.currentUser}'ın Odası`);
         if (!roomName) return;
 
-        const partyId = 'wp_' + Math.random().toString(36).substr(2, 6);
+        const partyId = 'wp_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 4);
         try {
             await db.collection('watchparties').doc(partyId).set({
                 roomName,
                 host: this.currentUser,
                 createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                status: 'open',
                 state: 'paused',
                 videoTime: 0,
-                lastUpdated: Date.now()
+                videoStartedAt: null,
+                lastUpdated: Date.now(),
+                members: [this.currentUser],
+                pendingJoins: [],
+                selectedContent: null
             });
-            this.joinWatchParty(partyId);
+            this.showToast('✅ Oda oluşturuldu!');
+            this.openWatchPartyRoom(partyId);
         } catch (e) {
             this.showToast('❌ Oda oluşturulamadı: ' + e.message);
         }
     },
 
-    async joinWatchParty(partyId) {
-        if (!partyId) {
-            partyId = prompt('Katılmak istediğiniz Oda Kodunu girin:');
-            if (!partyId) return;
+    async requestJoinWatchParty(partyId, hostHandle) {
+        if (!db || !this.currentUser) return;
+        try {
+            await db.collection('watchparties').doc(partyId).update({
+                pendingJoins: firebase.firestore.FieldValue.arrayUnion(this.currentUser)
+            });
+            this.showToast(`📨 @${hostHandle} onayı bekleniyor...`);
+            // Render'ı güncelle
+            this.renderActiveWatchParties();
+        } catch (e) {
+            this.showToast('❌ İstek gönderilemedi');
         }
+    },
 
+    async approveJoinRequest(partyId, handle) {
+        if (!db || !this.currentUser) return;
+        try {
+            await db.collection('watchparties').doc(partyId).update({
+                pendingJoins: firebase.firestore.FieldValue.arrayRemove(handle),
+                members: firebase.firestore.FieldValue.arrayUnion(handle)
+            });
+            // Onay bildirimi mesajı gönder
+            await db.collection('watchparties').doc(partyId).collection('wpmsgs').add({
+                sender: 'sistem',
+                text: `@${handle} odaya katıldı! 🎉`,
+                type: 'system',
+                timestamp: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            this.showToast(`✅ @${handle} odaya kabul edildi`);
+        } catch (e) {
+            this.showToast('❌ Hata: ' + e.message);
+        }
+    },
+
+    async denyJoinRequest(partyId, handle) {
+        if (!db || !this.currentUser) return;
+        try {
+            await db.collection('watchparties').doc(partyId).update({
+                pendingJoins: firebase.firestore.FieldValue.arrayRemove(handle)
+            });
+            this.showToast(`❌ @${handle} reddedildi`);
+        } catch (e) {
+            this.showToast('❌ Hata: ' + e.message);
+        }
+    },
+
+    openWatchPartyRoom(partyId) {
         this.currentWatchPartyId = partyId;
-        document.getElementById('watchPartyModal').style.display = 'flex';
-        const chatBox = document.getElementById('watchPartyChat');
-        if (chatBox) chatBox.innerHTML = '<div style="font-size:12px; color:var(--text3); text-align:center;">Odaya bağlanılıyor...</div>';
+        const modal = document.getElementById('watchPartyModal');
+        modal.style.display = 'flex';
+        modal.classList.add('open');
 
-        // Unsubscribe previous party listeners
+        // Listeners temizle
         if (this.watchPartyUnsubscribe) this.watchPartyUnsubscribe();
         if (this.watchPartyChatUnsubscribe) this.watchPartyChatUnsubscribe();
+        if (this.wpTimerInterval) clearInterval(this.wpTimerInterval);
 
-        // Listen to room playback status
+        this._wpLocalTime = 0;
+        this._wpPlaying = false;
+
+        // Oda verisini dinle
         this.watchPartyUnsubscribe = db.collection('watchparties').doc(partyId)
             .onSnapshot(doc => {
-                if (doc.exists) {
-                    const data = doc.data();
-                    const timerEl = document.getElementById('watchTimer');
-                    if (timerEl) {
-                        const sec = Math.floor(data.videoTime || 0);
-                        const mins = Math.floor(sec / 60);
-                        const secs = sec % 60;
-                        timerEl.innerText = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+                if (!doc.exists) return;
+                const data = doc.data();
+                this._wpCurrentPartyData = data;
+                const isHost = data.host === this.currentUser;
+
+                // Header güncelle
+                const header = document.getElementById('wpRoomHeader');
+                if (header) {
+                    const members = data.members || [];
+                    header.innerHTML = `
+                        <div style="font-weight:700; font-size:15px; color:var(--text);">🍿 ${data.roomName}</div>
+                        <div style="font-size:11px; color:var(--text2);">@${data.host} · ${members.length} üye</div>
+                    `;
+                }
+
+                // İçerik bilgisi
+                this._wpUpdateContentDisplay(data, isHost);
+
+                // Oynatıcı senkronu
+                if (data.state === 'playing' && data.videoStartedAt) {
+                    const elapsed = (Date.now() - data.videoStartedAt) / 1000;
+                    this._wpLocalTime = (data.videoTime || 0) + elapsed;
+                    if (!this._wpPlaying) {
+                        this._wpPlaying = true;
+                        this._wpStartLocalTimer();
                     }
-                    const btnSync = document.getElementById('btnSyncTimer');
-                    if (btnSync) {
-                        btnSync.innerText = data.state === 'playing' ? '⏸️ Duraklat / Senkronize Et' : '▶️ Oynat / Senkronize Et';
-                    }
+                } else {
+                    this._wpPlaying = false;
+                    this._wpLocalTime = data.videoTime || 0;
+                    if (this.wpTimerInterval) { clearInterval(this.wpTimerInterval); this.wpTimerInterval = null; }
+                    this._wpRenderTimer(this._wpLocalTime);
+                }
+
+                // Host kontrolleri
+                const controls = document.getElementById('wpHostControls');
+                if (controls) controls.style.display = isHost ? 'flex' : 'none';
+
+                const guestNotice = document.getElementById('wpGuestNotice');
+                if (guestNotice) guestNotice.style.display = isHost ? 'none' : 'flex';
+
+                // Play/pause butonu güncelle
+                const playBtn = document.getElementById('wpPlayBtn');
+                if (playBtn) {
+                    playBtn.innerHTML = data.state === 'playing'
+                        ? '<svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>'
+                        : '<svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><polygon points="5,3 19,12 5,21"/></svg>';
                 }
             });
 
-        // Listen to room chat
-        this.watchPartyChatUnsubscribe = db.collection('watchparties').doc(partyId).collection('wpmsgs')
-            .orderBy('timestamp', 'asc').limit(50)
+        // Chat dinle
+        const chatBox = document.getElementById('watchPartyChat');
+        if (chatBox) chatBox.innerHTML = '';
+
+        this.watchPartyChatUnsubscribe = db.collection('watchparties').doc(partyId)
+            .collection('wpmsgs')
+            .orderBy('timestamp', 'asc').limit(80)
             .onSnapshot(snap => {
                 if (!chatBox) return;
                 let html = '';
                 snap.forEach(mDoc => {
                     const m = mDoc.data();
-                    const isMe = m.sender === this.currentUser;
-                    html += `
-                    <div style="font-size:12px; padding:4px 8px; border-radius:6px; background:${isMe ? 'rgba(168,85,247,0.2)' : 'var(--bg2)'}; align-self:${isMe ? 'flex-end' : 'flex-start'}; max-width:90%;">
-                        <span style="font-weight:bold; color:var(--primary); font-size:10px;">@${m.sender}:</span> ${m.text}
-                    </div>`;
+                    if (m.type === 'system') {
+                        html += `<div class="wp-msg-system">— ${m.text} —</div>`;
+                    } else {
+                        const isMe = m.sender === this.currentUser;
+                        const u = this.state.globalUsers.find(x => x.handle === m.sender);
+                        const avatar = u ? u.avatar : '👤';
+                        const ts = m.timestamp ? new Date(m.timestamp.toMillis()).toLocaleTimeString('tr-TR', {hour:'2-digit',minute:'2-digit'}) : '';
+                        html += `
+                        <div class="wp-msg ${isMe ? 'wp-msg-me' : 'wp-msg-other'}">
+                            ${!isMe ? `<div class="wp-msg-avatar">${avatar}</div>` : ''}
+                            <div class="wp-msg-bubble">
+                                ${!isMe ? `<div class="wp-msg-sender">@${m.sender}</div>` : ''}
+                                <div class="wp-msg-text">${this._escapeHtml(m.text)}</div>
+                                <div class="wp-msg-time">${ts}</div>
+                            </div>
+                        </div>`;
+                    }
                 });
-                chatBox.innerHTML = html || '<div style="font-size:12px; color:var(--text3); text-align:center;">Odaya katıldınız. Sohbet edebilirsiniz!</div>';
+                chatBox.innerHTML = html;
                 chatBox.scrollTop = chatBox.scrollHeight;
             });
+    },
+
+    _escapeHtml(str) {
+        return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    },
+
+    _wpUpdateContentDisplay(data, isHost) {
+        const contentArea = document.getElementById('wpContentArea');
+        if (!contentArea) return;
+
+        const content = data.selectedContent;
+        if (!content) {
+            contentArea.innerHTML = isHost
+                ? `<div style="text-align:center; color:var(--text3); padding:16px 0;">
+                    <div style="font-size:28px; margin-bottom:8px;">🎬</div>
+                    <div style="font-size:13px; margin-bottom:12px;">Bir film veya dizi seç</div>
+                    <button onclick="App.openWpContentPicker()" class="btn-primary" style="padding:8px 20px; font-size:13px;">İçerik Seç</button>
+                   </div>`
+                : `<div style="text-align:center; color:var(--text3); padding:16px 0; font-size:13px;">⏳ Host içerik seçiyor...</div>`;
+            return;
+        }
+
+        // playimdb URL
+        const playUrl = content.imdbId
+            ? `https://www.playimdb.com/title/${content.imdbId}/`
+            : null;
+
+        const poster = content.poster
+            ? `<img src="${content.poster}" style="width:52px; height:78px; object-fit:cover; border-radius:8px; flex-shrink:0;" onerror="this.style.display='none'"/>`
+            : '<div style="width:52px;height:78px;background:var(--bg3);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;">🎬</div>';
+
+        let durationInfo = '';
+        if (content.type === 'movie' && content.duration) {
+            const h = Math.floor(content.duration / 60);
+            const m = content.duration % 60;
+            durationInfo = `<span style="font-size:11px; color:var(--text3);">⏱️ ${h > 0 ? h + 's ' : ''}${m}dk</span>`;
+        } else if (content.type === 'series' && content.episode) {
+            durationInfo = `<span style="font-size:11px; color:var(--text3);">📺 S${content.episode.season}E${content.episode.ep}${content.episode.duration ? ' · ' + content.episode.duration + 'dk' : ''}</span>`;
+        }
+
+        const changeBtn = isHost
+            ? `<button onclick="App.openWpContentPicker()" style="background:none; border:1px solid var(--border); border-radius:8px; color:var(--text2); padding:3px 8px; font-size:11px; cursor:pointer;">↺ Değiştir</button>`
+            : '';
+
+        // Oynatıcı bölümü
+        let playerHtml = '';
+        if (playUrl) {
+            const iframeId = 'wpPlayerIframe';
+            playerHtml = `
+            <div style="margin-top:10px; border-radius:10px; overflow:hidden; position:relative; background:#000;">
+                <iframe id="${iframeId}"
+                    src="${playUrl}"
+                    style="width:100%; height:200px; border:none; border-radius:10px; display:block;"
+                    allowfullscreen
+                    allow="autoplay; fullscreen"
+                    onerror="App._wpIframeError()"
+                    onload="App._wpIframeLoaded('${iframeId}')">
+                </iframe>
+                <div id="wpIframeFallback" style="display:none; padding:10px; text-align:center; background:var(--bg3); border-radius:0 0 10px 10px;">
+                    <div style="font-size:12px; color:var(--text2); margin-bottom:8px;">Site bu pencerede açılmıyor.</div>
+                    <a href="${playUrl}" target="_blank" 
+                       style="display:inline-flex; align-items:center; gap:6px; padding:8px 18px; background:var(--primary); color:white; border-radius:10px; text-decoration:none; font-size:13px; font-weight:700;">
+                        <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24"><polygon points="5,3 19,12 5,21"/></svg>
+                        playimdb.com'da İzle
+                    </a>
+                </div>
+            </div>`;
+        } else {
+            playerHtml = `
+            <div style="margin-top:10px; padding:12px; background:var(--bg3); border-radius:10px; border:1px dashed var(--border); text-align:center;">
+                <div style="font-size:12px; color:var(--text3); margin-bottom:6px;">Bu içerik için IMDb ID bulunamadı.</div>
+                <div style="font-size:11px; color:var(--text3);">Filmi tekrar silerek TMDB'den ekleyince otomatik alınır.</div>
+            </div>`;
+        }
+
+        contentArea.innerHTML = `
+        <div>
+            <div style="display:flex; gap:10px; align-items:flex-start;">
+                ${poster}
+                <div style="flex:1; min-width:0;">
+                    <div style="font-size:13px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${content.title}</div>
+                    <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-top:3px;">
+                        <span style="font-size:11px; color:var(--text2);">${content.type === 'movie' ? '🎬 Film' : '📺 Dizi'}${content.year ? ' · ' + content.year : ''}</span>
+                        ${durationInfo}
+                    </div>
+                    <div style="margin-top:6px; display:flex; gap:6px; align-items:center;">
+                        ${changeBtn}
+                    </div>
+                </div>
+            </div>
+            ${playerHtml}
+        </div>`;
+    },
+
+    _wpIframeLoaded(iframeId) {
+        // iframe yüklenince kontrol et — cross-origin nedeniyle çalışmıyorsa fallback göster
+        try {
+            const iframe = document.getElementById(iframeId);
+            if (!iframe) return;
+            // Eğer boş sayfa geldiyse fallback
+            setTimeout(() => {
+                try {
+                    const doc = iframe.contentDocument || iframe.contentWindow.document;
+                    if (!doc || doc.body.innerHTML === '') {
+                        document.getElementById('wpIframeFallback').style.display = 'block';
+                    }
+                } catch(e) {
+                    // cross-origin — site yüklendi, sorun yok
+                }
+            }, 3000);
+        } catch(e) {}
+    },
+
+    _wpIframeError() {
+        const fb = document.getElementById('wpIframeFallback');
+        if (fb) fb.style.display = 'block';
+    },
+
+    openWpContentPicker() {
+        const modal = document.getElementById('wpContentPickerModal');
+        if (!modal) return;
+
+        const allItems = [
+            ...this.state.movies.map(m => ({...m, _type: 'movie'})),
+            ...this.state.series.map(s => ({...s, _type: 'series'}))
+        ];
+
+        const list = document.getElementById('wpContentPickerList');
+        if (!list) return;
+
+        if (allItems.length === 0) {
+            list.innerHTML = '<div style="text-align:center; color:var(--text3); padding:20px;">Kütüphanende içerik yok. Önce film/dizi ekle!</div>';
+        } else {
+            list.innerHTML = allItems.map((item, i) => {
+                const poster = item.poster ? `<img src="${item.poster}" style="width:44px;height:66px;object-fit:cover;border-radius:6px;" onerror="this.style.display='none'"/>` : '<div style="width:44px;height:66px;background:var(--bg3);border-radius:6px;display:flex;align-items:center;justify-content:center;">🎬</div>';
+                const typeLabel = item._type === 'movie' ? '🎬' : '📺';
+                return `
+                <div onclick="App.selectWpContent('${item.id}', '${item._type}')"
+                     style="display:flex; align-items:center; gap:12px; padding:10px; border-radius:10px; cursor:pointer; border:1px solid var(--border); margin-bottom:6px; transition:background 0.2s;"
+                     onmouseenter="this.style.background='var(--bg3)'" onmouseleave="this.style.background='transparent'">
+                    ${poster}
+                    <div style="flex:1; min-width:0;">
+                        <div style="font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${typeLabel} ${item.title}</div>
+                        <div style="font-size:11px; color:var(--text2);">${item.year || ''} ${item.genre ? '· ' + item.genre : ''}</div>
+                        ${item._type === 'series' && item.seasons ? `<div style="font-size:10px; color:var(--text3);">${item.seasons} sezon</div>` : ''}
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        modal.style.display = 'flex';
+        modal.classList.add('open');
+    },
+
+    async selectWpContent(itemId, type) {
+        const arr = type === 'movie' ? this.state.movies : this.state.series;
+        const item = arr.find(x => x.id === itemId);
+        if (!item || !this.currentWatchPartyId) return;
+
+        if (type === 'series' && item.seasons > 0) {
+            // Bölüm seçim ekranı göster
+            this._wpShowEpisodePicker(item);
+            return;
+        }
+
+        // Film — direkt seç
+        const contentData = {
+            type: 'movie',
+            title: item.title,
+            poster: item.poster || '',
+            year: item.year || '',
+            duration: item.duration || null,
+            imdbId: item.imdbId || null
+        };
+
+        await this._saveWpContent(contentData);
+        document.getElementById('wpContentPickerModal').classList.remove('open');
+        document.getElementById('wpContentPickerModal').style.display = 'none';
+    },
+
+    _wpShowEpisodePicker(seriesItem) {
+        const list = document.getElementById('wpContentPickerList');
+        const seasons = seriesItem.seasons || 1;
+
+        // Sezon/bölüm yapısını al
+        const seasonEps = seriesItem.seasonEps || {};
+
+        let html = `<div style="display:flex; align-items:center; gap:8px; margin-bottom:16px;">
+            <button onclick="App.openWpContentPicker()" style="background:none; border:none; color:var(--primary); cursor:pointer; font-size:22px;">←</button>
+            <div>
+                <div style="font-size:14px; font-weight:700;">${seriesItem.title}</div>
+                <div style="font-size:12px; color:var(--text2);">Bir bölüm seç</div>
+            </div>
+        </div>`;
+
+        for (let s = 1; s <= seasons; s++) {
+            const epCount = (seasonEps[s] && seasonEps[s].count) || seriesItem.episodes || 10;
+            html += `<div style="margin-bottom:12px;">
+                <div style="font-size:12px; font-weight:700; color:var(--primary); margin-bottom:6px; padding:4px 8px; background:var(--bg3); border-radius:6px;">Sezon ${s}</div>
+                <div style="display:flex; flex-wrap:wrap; gap:6px;">`;
+
+            for (let e = 1; e <= epCount; e++) {
+                const epData = seasonEps[s] && seasonEps[s]['ep_' + e];
+                const epName = epData ? epData.name : null;
+                const epDur = epData ? epData.duration : null;
+                const tooltip = epName ? `title="${epName}${epDur ? ' · ' + epDur + 'dk' : ''}"` : '';
+                html += `<button onclick="App.confirmWpEpisode('${seriesItem.id}', ${s}, ${e})"
+                    ${tooltip}
+                    style="padding:5px 10px; border-radius:8px; background:var(--bg3); border:1px solid var(--border); color:var(--text); font-size:12px; cursor:pointer; transition:background 0.15s;"
+                    onmouseenter="this.style.background='var(--primary)'; this.style.color='white'"
+                    onmouseleave="this.style.background='var(--bg3)'; this.style.color='var(--text)'">
+                    B${e}
+                </button>`;
+            }
+            html += `</div></div>`;
+        }
+
+        list.innerHTML = html;
+        this._wpCurrentSeriesForEp = seriesItem;
+    },
+
+    async confirmWpEpisode(seriesId, season, ep) {
+        const item = this._wpCurrentSeriesForEp;
+        if (!item) return;
+
+        const seasonEps = item.seasonEps || {};
+        const epData = seasonEps[season] && seasonEps[season]['ep_' + ep];
+        const epName = epData ? epData.name : null;
+        const epDur = epData ? epData.duration : null;
+
+        const contentData = {
+            type: 'series',
+            title: item.title,
+            poster: item.poster || '',
+            year: item.year || '',
+            imdbId: item.imdbId || null,
+            episode: {
+                season,
+                ep,
+                name: epName || `Bölüm ${ep}`,
+                duration: epDur || null
+            }
+        };
+
+        await this._saveWpContent(contentData);
+        document.getElementById('wpContentPickerModal').classList.remove('open');
+        document.getElementById('wpContentPickerModal').style.display = 'none';
+    },
+
+    async _saveWpContent(contentData) {
+        if (!this.currentWatchPartyId || !db) return;
+        try {
+            await db.collection('watchparties').doc(this.currentWatchPartyId).update({
+                selectedContent: contentData,
+                state: 'paused',
+                videoTime: 0,
+                videoStartedAt: null
+            });
+            // Chat'e sistem mesajı
+            await db.collection('watchparties').doc(this.currentWatchPartyId).collection('wpmsgs').add({
+                sender: 'sistem',
+                text: `İzlenecek: ${contentData.title}${contentData.episode ? ' S' + contentData.episode.season + 'E' + contentData.episode.ep : ''} 🎬`,
+                type: 'system',
+                timestamp: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            this.showToast('✅ İçerik seçildi!');
+        } catch (e) {
+            this.showToast('❌ İçerik kaydedilemedi');
+        }
+    },
+
+    _wpStartLocalTimer() {
+        if (this.wpTimerInterval) clearInterval(this.wpTimerInterval);
+        this.wpTimerInterval = setInterval(() => {
+            if (this._wpPlaying) {
+                this._wpLocalTime += 1;
+                this._wpRenderTimer(this._wpLocalTime);
+            }
+        }, 1000);
+    },
+
+    _wpRenderTimer(totalSec) {
+        const el = document.getElementById('watchTimer');
+        if (!el) return;
+        const s = Math.floor(totalSec);
+        const h = Math.floor(s / 3600);
+        const m = Math.floor((s % 3600) / 60);
+        const sec = s % 60;
+        el.innerText = (h > 0 ? String(h).padStart(2,'0') + ':' : '') + String(m).padStart(2,'0') + ':' + String(sec).padStart(2,'0');
+    },
+
+    async toggleWatchPartyState() {
+        if (!this.currentWatchPartyId || !db) return;
+        const data = this._wpCurrentPartyData;
+        if (!data) return;
+        // Sadece host kontrol edebilir
+        if (data.host !== this.currentUser) return;
+
+        try {
+            const isPlaying = data.state === 'playing';
+            const newState = isPlaying ? 'paused' : 'playing';
+            const updateData = {
+                state: newState,
+                videoTime: this._wpLocalTime,
+                lastUpdated: Date.now()
+            };
+            if (newState === 'playing') {
+                updateData.videoStartedAt = Date.now();
+            } else {
+                updateData.videoStartedAt = null;
+            }
+            await db.collection('watchparties').doc(this.currentWatchPartyId).update(updateData);
+
+            // Sistem mesajı
+            await db.collection('watchparties').doc(this.currentWatchPartyId).collection('wpmsgs').add({
+                sender: 'sistem',
+                text: newState === 'playing' ? '▶️ Film başlatıldı' : '⏸️ Film duraklatıldı',
+                type: 'system',
+                timestamp: firebase.firestore.FieldValue.serverTimestamp()
+            });
+        } catch (e) {
+            this.showToast('❌ Senkronizasyon hatası');
+        }
+    },
+
+    async closeWatchParty() {
+        if (!this.currentWatchPartyId || !db) return;
+        const data = this._wpCurrentPartyData;
+        // Host odayı kapatsın
+        if (data && data.host === this.currentUser) {
+            if (!confirm('Odayı kapatmak istediğinize emin misiniz? Tüm üyeler çıkarılacak.')) return;
+            try {
+                await db.collection('watchparties').doc(this.currentWatchPartyId).update({ status: 'closed' });
+            } catch (e) {}
+        }
+        this._closeWpModal();
+    },
+
+    _closeWpModal() {
+        const modal = document.getElementById('watchPartyModal');
+        if (modal) { modal.classList.remove('open'); modal.style.display = 'none'; }
+        if (this.watchPartyUnsubscribe) { this.watchPartyUnsubscribe(); this.watchPartyUnsubscribe = null; }
+        if (this.watchPartyChatUnsubscribe) { this.watchPartyChatUnsubscribe(); this.watchPartyChatUnsubscribe = null; }
+        if (this.wpTimerInterval) { clearInterval(this.wpTimerInterval); this.wpTimerInterval = null; }
+        this.currentWatchPartyId = null;
+        this._wpCurrentPartyData = null;
+        this._wpPlaying = false;
     },
 
     async sendWatchPartyMessage() {
@@ -2443,35 +2999,15 @@ const App = {
         if (!input || !input.value.trim() || !this.currentWatchPartyId || !db) return;
         const text = input.value.trim();
         input.value = '';
-
         try {
             await db.collection('watchparties').doc(this.currentWatchPartyId).collection('wpmsgs').add({
                 sender: this.currentUser,
                 text,
+                type: 'chat',
                 timestamp: firebase.firestore.FieldValue.serverTimestamp()
             });
         } catch (e) {
             this.showToast('❌ Mesaj iletilemedi');
-        }
-    },
-
-    async toggleWatchPartyState() {
-        if (!this.currentWatchPartyId || !db) return;
-        try {
-            const docRef = db.collection('watchparties').doc(this.currentWatchPartyId);
-            const snap = await docRef.get();
-            if (snap.exists) {
-                const cur = snap.data().state;
-                const nextState = cur === 'playing' ? 'paused' : 'playing';
-                // Toggle playback state and bump timer 10 seconds for simulated fun synchronization demo
-                await docRef.update({
-                    state: nextState,
-                    videoTime: (snap.data().videoTime || 0) + (nextState === 'playing' ? 10 : 0),
-                    lastUpdated: Date.now()
-                });
-            }
-        } catch (e) {
-            console.warn('Sync error:', e);
         }
     },
 
@@ -2566,63 +3102,7 @@ const App = {
     },
 
     initWatchParty() {
-        const btn = document.getElementById('btnCreateWatchParty');
-        if (!btn || btn.dataset.bound) return;
-        btn.dataset.bound = 'true';
-
-        btn.addEventListener('click', () => {
-            document.getElementById('watchPartyModal').classList.add('open');
-            document.getElementById('watchPartyChat').innerHTML = `<div style="font-size:12px; color:var(--text3); text-align:center;">Odaya katıldınız. Arkadaşlarınızı bekleyin.</div>`;
-            document.getElementById('watchTimer').innerText = '00:00:00';
-            clearInterval(this.watchInterval);
-        });
-
-        document.getElementById('watchPartyCloseBtn').addEventListener('click', () => {
-            document.getElementById('watchPartyModal').classList.remove('open');
-            clearInterval(this.watchInterval);
-        });
-
-        document.getElementById('btnSyncTimer').addEventListener('click', (e) => {
-            if (e.target.innerText.includes('Başlat')) {
-                e.target.innerText = '⏸️ Durdur';
-                let sec = 0;
-                this.watchInterval = setInterval(() => {
-                    sec++;
-                    const h = String(Math.floor(sec / 3600)).padStart(2, '0');
-                    const m = String(Math.floor((sec % 3600) / 60)).padStart(2, '0');
-                    const s = String(sec % 60).padStart(2, '0');
-                    document.getElementById('watchTimer').innerText = `${h}:${m}:${s}`;
-                }, 1000);
-                this.addWatchChatSystemMsg('Film başlatıldı!');
-            } else {
-                e.target.innerText = '▶️ Başlat / Senkronize Et';
-                clearInterval(this.watchInterval);
-                this.addWatchChatSystemMsg('Film duraklatıldı.');
-            }
-        });
-
-        document.getElementById('wpChatSendBtn').addEventListener('click', () => {
-            const input = document.getElementById('wpChatInput');
-            if(input.value.trim()) {
-                this.addWatchChatMsg(this.currentUser, input.value.trim());
-                input.value = '';
-            }
-        });
-        document.getElementById('wpChatInput').addEventListener('keypress', (e) => {
-            if(e.key === 'Enter') document.getElementById('wpChatSendBtn').click();
-        });
-    },
-
-    addWatchChatSystemMsg(msg) {
-        const chat = document.getElementById('watchPartyChat');
-        chat.innerHTML += `<div style="font-size:12px; color:var(--primary); text-align:center; margin: 4px 0;">-- ${msg} --</div>`;
-        chat.scrollTop = chat.scrollHeight;
-    },
-
-    addWatchChatMsg(user, msg) {
-        const chat = document.getElementById('watchPartyChat');
-        chat.innerHTML += `<div style="font-size:13px; margin: 4px 0;"><strong>@${user}:</strong> <span style="color:var(--text2);">${msg}</span></div>`;
-        chat.scrollTop = chat.scrollHeight;
+        // Artık bindEvents içinde bağlanıyor — bu metod eski compat için bırakıldı
     },
 
     // ==========================================
@@ -2914,29 +3394,21 @@ const App = {
             }
         } else {
             title.innerText = 'Takipçilerin';
-            try {
-                if (!db) throw new Error('Firestore unavailable');
-                const snap = await db.collection('userData').doc(this.currentUser).get();
-                const followers = snap.exists ? (snap.data().followers || []) : [];
-
-                if (followers.length === 0) {
-                    list.innerHTML = '<div class="empty-widget">Henüz takipçin yok.</div>';
-                } else {
-                    const userItems = await Promise.all(followers.map(async handle => {
-                        const uSnap = await db.collection('users').doc(handle).get();
-                        return uSnap.exists ? uSnap.data() : { handle, name: handle, avatar: '👤' };
-                    }));
-                    list.innerHTML = userItems.map(u => `
+            const followers = this.state.followers || [];
+            if (followers.length === 0) {
+                list.innerHTML = '<div class="empty-widget">Henüz takipçin yok.</div>';
+            } else {
+                list.innerHTML = followers.map(handle => {
+                    const u = this.state.globalUsers.find(x => x.handle === handle) || { handle, name: handle, avatar: '👤' };
+                    return `
                     <div onclick="App.closeModals(); App.openOtherProfile('${u.handle}')" style="background:var(--bg2); padding:12px; border-radius:8px; border:1px solid var(--border); margin-bottom:8px; cursor:pointer; display:flex; gap:12px; align-items:center;">
                         <div style="font-size:24px;">${u.avatar || '👤'}</div>
                         <div>
                             <div style="font-size:14px; font-weight:bold;">${u.name}</div>
                             <div style="font-size:12px; color:var(--text2);">@${u.handle}</div>
                         </div>
-                    </div>`).join('');
-                }
-            } catch(e) {
-                list.innerHTML = '<div class="empty-widget">Takipçiler yüklenemedi.</div>';
+                    </div>`;
+                }).join('');
             }
         }
     },
