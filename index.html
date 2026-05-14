@@ -393,41 +393,44 @@
 
       <!-- Social Tab -->
       <section class="tab-content" id="tab-social">
-        <header class="header" style="margin-bottom: 24px;">
-          <h1 class="header-title" style="font-size: 20px; font-weight:700;">Keşfet & Sosyalleş</h1>
-          <p class="header-subtitle" style="font-size:13px; color:var(--text2); margin-top:4px;">Diğer kullanıcıları bul ve listelerine göz at</p>
+        <header class="header" style="margin-bottom: 20px;">
+          <h1 class="header-title" style="font-size: 20px; font-weight:700;">💬 Mesajlar</h1>
+          <p class="header-subtitle" style="font-size:13px; color:var(--text2); margin-top:4px;">Arkadaşlarını bul, takip et ve mesajlaş</p>
         </header>
 
-        <div class="search-bar" style="margin-bottom: 24px;">
-          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
-          <input type="text" id="socialSearchInput" placeholder="Kullanıcı ara (@handle veya isim)..." autocomplete="off" />
+        <!-- User Search -->
+        <div style="margin-bottom: 20px;">
+          <div class="search-bar" style="margin-bottom: 10px;">
+            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+            <input type="text" id="socialSearchInput" placeholder="İsim veya @handle ara..." autocomplete="off" />
+          </div>
+          <!-- Search Results -->
+          <div id="userSearchResults" style="display:none; background:var(--bg2); border:1px solid var(--border); border-radius:12px; overflow:hidden; margin-bottom:12px;"></div>
         </div>
 
-        <!-- AI Suggestion -->
-        <div class="widget stats-widget" style="margin-bottom: 24px; background: linear-gradient(135deg, rgba(139,92,246,0.1), rgba(236,72,153,0.1)); border: 1px solid rgba(139,92,246,0.3);">
-          <h3 class="widget-title" style="display:flex; align-items:center; gap:8px;">
-            <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-            Yapay Zeka Önerisi
-          </h3>
-          <div id="aiSuggestionBox" style="display:flex; gap:12px; align-items:center;">
-            <div class="empty-widget" style="width:100%; text-align:center;">Öneri alabilmek için kütüphanene birkaç içerik ekle!</div>
+        <!-- Conversations List -->
+        <div style="margin-bottom: 16px;">
+          <h3 style="font-size:14px; font-weight:600; color:var(--text2); margin-bottom:12px; text-transform:uppercase; letter-spacing:0.5px;">Sohbetler</h3>
+          <div id="conversationsList">
+            <div class="empty-widget" style="text-align:center; color:var(--text3); padding:32px 16px;">
+              <div style="font-size:36px; margin-bottom:8px;">💬</div>
+              <div>Henüz sohbet yok. Yukarıdan birini ara!</div>
+            </div>
           </div>
         </div>
 
-        <!-- Watch Party -->
-        <div class="widget stats-widget" style="margin-bottom: 24px;">
-          <h3 class="widget-title" style="display:flex; align-items:center; gap:8px;">
-            <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
-            Ortak İzleme Odaları
+        <!-- AI Suggestion (compact) -->
+        <div class="widget stats-widget" style="margin-bottom: 16px; background: linear-gradient(135deg, rgba(139,92,246,0.08), rgba(236,72,153,0.08)); border: 1px solid rgba(139,92,246,0.2);">
+          <h3 class="widget-title" style="display:flex; align-items:center; gap:8px; font-size:13px;">
+            🤖 Yapay Zeka Önerisi
           </h3>
-          <p style="font-size:13px; color:var(--text2); margin-bottom:12px;">Arkadaşlarınla senkronize film izle ve sohbet et!</p>
-          <button class="btn-primary" id="btnCreateWatchParty" style="width:100%;">Oda Oluştur</button>
+          <div id="aiSuggestionBox" style="display:flex; gap:12px; align-items:center;">
+            <div class="empty-widget" style="width:100%; text-align:center; font-size:13px;">Öneri alabilmek için kütüphanene birkaç içerik ekle!</div>
+          </div>
         </div>
 
-        <h3 style="font-size: 15px; font-weight: 600; margin-bottom: 12px;">Topluluk (Beta)</h3>
-        <div id="usersList" class="users-grid" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap:12px;">
-          <!-- Users will be injected here -->
-        </div>
+        <!-- Hidden legacy usersList for compatibility -->
+        <div id="usersList" style="display:none;"></div>
       </section>
     </main>
 

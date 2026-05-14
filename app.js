@@ -614,8 +614,23 @@ const App = {
         if (document.getElementById('chatCloseBtn')) document.getElementById('chatCloseBtn').addEventListener('click', () => this.closeModals());
         if (document.getElementById('deleteAccountBtn')) document.getElementById('deleteAccountBtn').addEventListener('click', () => this.deleteAccount());
         if (document.getElementById('socialSearchInput')) {
-            document.getElementById('socialSearchInput').addEventListener('input', (e) => {
-                this.renderSocialTab(e.target.value.trim().toLowerCase());
+            const searchInput = document.getElementById('socialSearchInput');
+            searchInput.addEventListener('input', (e) => {
+                const q = e.target.value.trim();
+                if (q.length === 0) {
+                    document.getElementById('userSearchResults').style.display = 'none';
+                } else {
+                    this.renderUserSearch(q);
+                }
+            });
+            searchInput.addEventListener('focus', (e) => {
+                if (e.target.value.trim()) this.renderUserSearch(e.target.value.trim());
+            });
+            document.addEventListener('click', (e) => {
+                if (!e.target.closest('#tab-social .search-bar') && !e.target.closest('#userSearchResults')) {
+                    const r = document.getElementById('userSearchResults');
+                    if (r) r.style.display = 'none';
+                }
             });
         }
         if (document.getElementById('chatSendBtn')) {
@@ -2053,34 +2068,120 @@ const App = {
 
     renderSocialTab(query = '') {
         this.renderAiSuggestion();
-        this.initWatchParty();
+        this.renderConversationsList();
+    },
 
-        const list = document.getElementById('usersList');
-        if (!list) return;
+    renderUserSearch(query) {
+        const resultsBox = document.getElementById('userSearchResults');
+        if (!resultsBox) return;
 
+        const q = query.trim().toLowerCase();
         let users = this.state.globalUsers.filter(u => u.handle !== this.currentUser);
-        if (query) {
-            users = users.filter(u => u.handle.includes(query) || u.name.toLowerCase().includes(query));
+        if (q) {
+            users = users.filter(u =>
+                u.handle.toLowerCase().includes(q) ||
+                (u.name || '').toLowerCase().includes(q)
+            );
         }
 
         if (users.length === 0) {
-            list.innerHTML = '<div class="empty-widget" style="grid-column: 1/-1;">Kullanıcı bulunamadı.</div>';
+            resultsBox.innerHTML = '<div style="padding:16px; text-align:center; color:var(--text3); font-size:13px;">Kullanıcı bulunamadı</div>';
+            resultsBox.style.display = 'block';
             return;
         }
 
-        list.innerHTML = users.map(u => {
+        resultsBox.style.display = 'block';
+        resultsBox.innerHTML = users.slice(0, 8).map(u => {
+            const isFollowing = this.state.following.includes(u.handle);
             return `
-            <div class="user-card" onclick="App.openOtherProfile('${u.handle}')" style="flex-direction:column; align-items:flex-start; position:relative; background:var(--bg2); padding:16px; border-radius:12px; border:1px solid var(--border); cursor:pointer;">
-                <div style="display:flex; align-items:center; gap:12px; width:100%;">
-                    <div class="user-avatar" style="font-size:32px;">${u.avatar || '👤'}</div>
-                    <div class="user-info" style="display:flex; flex-direction:column; align-items:flex-start;">
-                        <span class="user-name" style="font-size:14px; font-weight:700;">${u.name}</span>
-                        <span class="user-handle" style="font-size:12px; color:var(--text2);">@${u.handle}</span>
-                    </div>
+            <div style="display:flex; align-items:center; gap:12px; padding:12px 16px; border-bottom:1px solid var(--border); cursor:pointer;"
+                 onmouseenter="this.style.background='var(--bg3)'" onmouseleave="this.style.background='transparent'">
+                <div style="font-size:28px; flex-shrink:0;">${u.avatar || '👤'}</div>
+                <div style="flex:1; min-width:0;">
+                    <div style="font-size:14px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${u.name}</div>
+                    <div style="font-size:12px; color:var(--text2);">@${u.handle}</div>
                 </div>
-                <div style="font-size:12px; color:var(--text3); margin-top:8px;">Mesaj göndermek için tıkla</div>
-            </div>
-            `;
+                <div style="display:flex; gap:8px; flex-shrink:0;">
+                    <button onclick="App.quickToggleFollow('${u.handle}'); event.stopPropagation();" 
+                        style="padding:6px 12px; border-radius:20px; border:1px solid ${isFollowing ? 'var(--border)' : 'var(--primary)'}; 
+                               background:${isFollowing ? 'transparent' : 'var(--primary)'}; color:${isFollowing ? 'var(--text2)' : 'white'};
+                               font-size:12px; font-weight:600; cursor:pointer; transition:all 0.2s;">
+                        ${isFollowing ? 'Takip Ediliyor' : 'Takip Et'}
+                    </button>
+                    <button onclick="App.openChat('${u.handle}'); document.getElementById('userSearchResults').style.display='none'; document.getElementById('socialSearchInput').value=''; event.stopPropagation();"
+                        style="padding:6px 12px; border-radius:20px; border:1px solid var(--primary); background:transparent; color:var(--primary);
+                               font-size:12px; font-weight:600; cursor:pointer;">
+                        Mesaj
+                    </button>
+                </div>
+            </div>`;
+        }).join('');
+    },
+
+    async quickToggleFollow(handle) {
+        // Follow/unfollow without opening profile modal
+        const isFollowing = this.state.following.includes(handle);
+        try {
+            if (isFollowing) {
+                this.state.following = this.state.following.filter(h => h !== handle);
+                if (db) {
+                    await db.collection('userData').doc(this.currentUser).set(
+                        { following: firebase.firestore.FieldValue.arrayRemove(handle) }, { merge: true });
+                    await db.collection('userData').doc(handle).set(
+                        { followers: firebase.firestore.FieldValue.arrayRemove(this.currentUser) }, { merge: true });
+                }
+                this.showToast('Takipten çıkıldı');
+            } else {
+                this.state.following.push(handle);
+                if (db) {
+                    await db.collection('userData').doc(this.currentUser).set(
+                        { following: firebase.firestore.FieldValue.arrayUnion(handle) }, { merge: true });
+                    await db.collection('userData').doc(handle).set(
+                        { followers: firebase.firestore.FieldValue.arrayUnion(this.currentUser) }, { merge: true });
+                }
+                this.showToast('Takip ediliyor ❤️');
+            }
+            this.renderProfileStats();
+            // Refresh search results
+            const q = document.getElementById('socialSearchInput')?.value?.trim();
+            if (q) this.renderUserSearch(q);
+        } catch(e) {
+            this.showToast('❌ Hata: ' + e.message);
+        }
+    },
+
+    async renderConversationsList() {
+        const list = document.getElementById('conversationsList');
+        if (!list || !db || !this.currentUser) return;
+
+        // Build conversation list from following
+        const contacts = this.state.following;
+
+        if (contacts.length === 0) {
+            list.innerHTML = `
+                <div class="empty-widget" style="text-align:center; color:var(--text3); padding:32px 16px;">
+                    <div style="font-size:36px; margin-bottom:8px;">💬</div>
+                    <div>Takip ettiğin biri yok. Yukarıdan birini bul!</div>
+                </div>`;
+            return;
+        }
+
+        list.innerHTML = contacts.map(handle => {
+            const u = this.state.globalUsers.find(x => x.handle === handle);
+            if (!u) return '';
+            return `
+            <div onclick="App.openChat('${u.handle}')" 
+                 style="display:flex; align-items:center; gap:12px; padding:14px 16px; border-radius:12px;
+                        background:var(--bg2); border:1px solid var(--border); margin-bottom:10px;
+                        cursor:pointer; transition:all 0.2s;"
+                 onmouseenter="this.style.background='var(--bg3)'" onmouseleave="this.style.background='var(--bg2)'">
+                <div style="font-size:32px; flex-shrink:0;">${u.avatar || '👤'}</div>
+                <div style="flex:1; min-width:0;">
+                    <div style="font-size:14px; font-weight:700;">${u.name}</div>
+                    <div style="font-size:12px; color:var(--text2);">@${u.handle}</div>
+                </div>
+                <div style="color:var(--primary); font-size:20px;">›</div>
+            </div>`;
         }).join('');
     },
 
