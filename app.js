@@ -39,14 +39,73 @@ const App = {
                 document.getElementById('splash').classList.add('hidden');
                 document.getElementById('loginScreen').classList.remove('hidden');
             }, 1500);
+            // Toggle Passwords
+            document.querySelectorAll('.toggle-password').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const targetId = e.currentTarget.dataset.target;
+                    const input = document.getElementById(targetId);
+                    if (input.type === 'password') {
+                        input.type = 'text';
+                        e.currentTarget.innerText = '🙈';
+                    } else {
+                        input.type = 'password';
+                        e.currentTarget.innerText = '👁️';
+                    }
+                });
+            });
+
+            // Handle suggestions
+            const handleInput = document.getElementById('regHandleInput');
+            const suggestionBox = document.getElementById('handleSuggestion');
+            
+            if (handleInput && suggestionBox) {
+                handleInput.addEventListener('input', (e) => {
+                    const handle = e.target.value.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
+                    if (!handle) {
+                        suggestionBox.style.display = 'none';
+                        return;
+                    }
+                    
+                    const exists = this.state.globalUsers.find(u => u.handle === handle);
+                    if (exists) {
+                        let num = 1;
+                        let suggestedHandle = `${handle}${num}`;
+                        while (this.state.globalUsers.find(u => u.handle === suggestedHandle)) {
+                            num++;
+                            suggestedHandle = `${handle}${num}`;
+                        }
+                        suggestionBox.innerHTML = `Bu ad alınmış. Şunu dene: <span style="font-weight:bold; text-decoration:underline;">@${suggestedHandle}</span>`;
+                        suggestionBox.style.display = 'block';
+                        suggestionBox.onclick = () => {
+                            handleInput.value = suggestedHandle;
+                            suggestionBox.style.display = 'none';
+                        };
+                    } else {
+                        suggestionBox.style.display = 'none';
+                    }
+                });
+            }
             
             document.getElementById('loginBtn').addEventListener('click', () => {
                 const handle = document.getElementById('usernameInput').value.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
-                if (handle) {
-                    this.login(handle);
-                    document.getElementById('loginScreen').classList.add('hidden');
-                    document.getElementById('app').classList.remove('hidden');
+                const password = document.getElementById('passwordInput').value.trim();
+                
+                if (!handle || !password) return alert('Kullanıcı adı ve şifre gereklidir.');
+                
+                const user = this.state.globalUsers.find(u => u.handle === handle);
+                if (!user) return alert('Kullanıcı bulunamadı. Lütfen hesap oluşturun.');
+                
+                if (user.password) {
+                    if (user.password !== password) return alert('Hatalı şifre.');
+                } else {
+                    // Legacy account migration
+                    user.password = password;
+                    localStorage.setItem('cinetrack_global_users', JSON.stringify(this.state.globalUsers));
                 }
+
+                this.login(handle);
+                document.getElementById('loginScreen').classList.add('hidden');
+                document.getElementById('app').classList.remove('hidden');
             });
 
             if (document.getElementById('showRegisterBtn')) {
@@ -69,12 +128,14 @@ const App = {
                 document.getElementById('registerBtn').addEventListener('click', () => {
                     const name = document.getElementById('regNameInput').value.trim();
                     const handle = document.getElementById('regHandleInput').value.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
+                    const password = document.getElementById('regPasswordInput').value.trim();
                     const avatar = document.querySelector('.avatar-option.selected').innerText;
                     
-                    if (!name || !handle) return alert('Ad ve Kullanıcı Adı zorunludur.');
+                    if (!name || !handle || !password) return alert('Ad, Kullanıcı Adı ve Şifre zorunludur.');
                     if (this.state.globalUsers.find(u => u.handle === handle)) return alert('Bu kullanıcı adı alınmış.');
+                    if (password.length < 6) return alert('Şifre en az 6 karakter olmalıdır.');
                     
-                    const newUser = { handle, name, avatar, createdAt: Date.now() };
+                    const newUser = { handle, name, avatar, password, createdAt: Date.now() };
                     this.state.globalUsers.push(newUser);
                     localStorage.setItem('cinetrack_global_users', JSON.stringify(this.state.globalUsers));
                     
@@ -542,7 +603,7 @@ const App = {
         const userLang = navigator.language || 'tr-TR';
 
         try {
-            const res = await fetch(`https://api.themoviedb.org/3/${endpoint}/${id}?api_key=${TMDB_API_KEY}&language=${userLang}`);
+            const res = await fetch(`https://api.themoviedb.org/3/${endpoint}/${id}?api_key=${TMDB_API_KEY}&language=${userLang}&append_to_response=credits`);
             const data = await res.json();
 
             const title = type === 'movie' ? data.title : data.name;
@@ -550,11 +611,14 @@ const App = {
             const year = dateField ? parseInt(dateField.split('-')[0]) : '';
             const genre = data.genres ? data.genres.map(g => g.name).join(', ') : '';
             const poster = data.poster_path ? `https://image.tmdb.org/t/p/w500${data.poster_path}` : '';
+            const overview = data.overview || 'Konu bulunamadı.';
+            const cast = data.credits && data.credits.cast ? data.credits.cast.slice(0, 5).map(c => c.name).join(', ') : 'Oyuncu bilgisi yok.';
 
             document.getElementById('formTitle').value = title || '';
             document.getElementById('formYear').value = year || '';
             document.getElementById('formGenre').value = genre || '';
             document.getElementById('formPoster').value = poster || '';
+            document.getElementById('formNote').value = `Konu: ${overview}\n\nOyuncular: ${cast}`;
             
             const voteAvg = data.vote_average ? data.vote_average.toFixed(1) : '';
             document.getElementById('formGlobalRating').value = voteAvg;
@@ -565,6 +629,14 @@ const App = {
             } else {
                 document.getElementById('formSeasons').value = data.number_of_seasons || 1;
                 document.getElementById('formEpisodes').value = data.number_of_episodes || 10;
+                
+                if (data.seasons && data.seasons.length > 0) {
+                    this.tempSeasonsData = data.seasons
+                        .filter(s => s.season_number > 0)
+                        .map(s => ({ season: s.season_number, episodes: s.episode_count }));
+                } else {
+                    this.tempSeasonsData = null;
+                }
             }
 
             resultsContainer.classList.add('hidden');
@@ -595,6 +667,7 @@ const App = {
         document.getElementById('formSeriesStatus').value = 'watchlist';
         document.getElementById('formSeasons').value = '1';
         document.getElementById('formEpisodes').value = '1';
+        this.tempSeasonsData = null;
 
         document.querySelector(`.type-btn[data-type="${type}"]`).click();
         
@@ -707,20 +780,28 @@ const App = {
                 ...baseItem,
                 type: 'series',
                 status, seasons, episodes,
+                seasonsData: this.tempSeasonsData || (existing ? existing.seasonsData : null),
                 rating: existing ? existing.rating : 0
             };
 
             if (isEdit) {
                 const idx = this.state.series.findIndex(s => s.id === this.editingId);
                 if (idx > -1) {
+                    if (status === 'completed') {
+                        newItem.watchedEps = this.generateAllEps(seasons, episodes, newItem.seasonsData);
+                    } else {
+                        newItem.watchedEps = existing.watchedEps || [];
+                    }
                     this.state.series[idx] = { ...this.state.series[idx], ...newItem };
                 }
             } else {
                 newItem.id = Date.now().toString();
                 newItem.createdAt = Date.now();
-                newItem.watchedEps = []; // Array of ep IDs like "1-1"
+                newItem.watchedEps = status === 'completed' ? this.generateAllEps(seasons, episodes, newItem.seasonsData) : [];
                 this.state.series.push(newItem);
             }
+            
+            this.tempSeasonsData = null;
         }
 
         this.save();
@@ -785,11 +866,35 @@ const App = {
         const idx = arr.findIndex(x => x.id === id);
         if (idx > -1) {
             arr[idx].status = status;
+            if (type === 'series' && status === 'completed') {
+                arr[idx].watchedEps = this.generateAllEps(arr[idx].seasons, arr[idx].episodes, arr[idx].seasonsData);
+            }
             if (status === 'watched' || status === 'completed' || status === 'watching') this.updateStreak();
             this.save();
             this.renderAll();
             this.showToast('Durum güncellendi');
+            if (type === 'series') this.openSeriesDetail(id);
         }
+    },
+
+    generateAllEps(seasons, episodes, seasonsData) {
+        const arr = [];
+        if (seasonsData && seasonsData.length > 0) {
+            seasonsData.forEach(sd => {
+                for (let j = 1; j <= sd.episodes; j++) {
+                    arr.push(`${sd.season}-${j}`);
+                }
+            });
+        } else {
+            const epsPerSeason = Math.ceil(episodes / seasons);
+            for (let i = 1; i <= seasons; i++) {
+                const epsInThisSeason = i === seasons ? (episodes - (i-1)*epsPerSeason) : epsPerSeason;
+                for (let j = 1; j <= epsInThisSeason; j++) {
+                    arr.push(`${i}-${j}`);
+                }
+            }
+        }
+        return arr;
     },
 
     renderAll() {
@@ -798,6 +903,103 @@ const App = {
         this.renderDashboard();
         this.renderMovies();
         this.renderSeries();
+        this.renderProfileStats();
+    },
+
+    renderProfileStats() {
+        // Badges & Streak
+        document.getElementById('statStreak').innerHTML = `🔥 ${this.state.streak}`;
+        
+        let earnedBadges = [];
+        if (this.state.movies.length > 0 || this.state.series.length > 0) {
+            earnedBadges.push({ icon: '👶', name: 'Yeni Kan', desc: 'İlk içerik eklendi' });
+        }
+        
+        const watchedMovies = this.state.movies.filter(m => m.status === 'watched').length;
+        if (watchedMovies >= 10) {
+            earnedBadges.push({ icon: '🍿', name: 'Sinema Kurdu', desc: '10 film izlendi' });
+        } else if (watchedMovies >= 50) {
+            earnedBadges.push({ icon: '👑', name: 'Film Gurmesi', desc: '50 film izlendi' });
+        }
+
+        let totalEps = 0;
+        this.state.series.forEach(s => { if (s.watchedEps) totalEps += s.watchedEps.length; });
+        if (totalEps >= 20) {
+            earnedBadges.push({ icon: '📺', name: 'Dizi Kolik', desc: '20 bölüm izlendi' });
+        }
+
+        document.getElementById('statBadgeCount').innerText = earnedBadges.length;
+
+        const badgesList = document.getElementById('badgesList');
+        if (earnedBadges.length === 0) {
+            badgesList.innerHTML = `<div class="empty-widget" style="width:100%; text-align:center;">Henüz rozet kazanılmadı</div>`;
+        } else {
+            badgesList.innerHTML = earnedBadges.map(b => `
+                <div style="background:var(--bg2); padding:12px; border-radius:12px; border:1px solid var(--border); min-width:120px; text-align:center; display:flex; flex-direction:column; align-items:center; gap:4px;">
+                    <span style="font-size:24px;">${b.icon}</span>
+                    <span style="font-size:13px; font-weight:600;">${b.name}</span>
+                    <span style="font-size:10px; color:var(--text3);">${b.desc}</span>
+                </div>
+            `).join('');
+        }
+
+        // Chart.js (Genre Distribution)
+        const ctx = document.getElementById('genreChart');
+        if (!ctx) return;
+        
+        const genreCounts = {};
+        [...this.state.movies, ...this.state.series].forEach(item => {
+            if (item.genre) {
+                item.genre.split(',').forEach(g => {
+                    const cleanG = g.trim();
+                    if (cleanG) {
+                        genreCounts[cleanG] = (genreCounts[cleanG] || 0) + 1;
+                    }
+                });
+            }
+        });
+
+        const sortedGenres = Object.entries(genreCounts).sort((a,b) => b[1] - a[1]).slice(0, 5);
+        
+        if (sortedGenres.length === 0) {
+            // Nothing to show yet
+            return;
+        }
+
+        if (this.genreChartInstance) {
+            this.genreChartInstance.destroy();
+        }
+
+        const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+        this.genreChartInstance = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: sortedGenres.map(g => g[0]),
+                datasets: [{
+                    data: sortedGenres.map(g => g[1]),
+                    backgroundColor: [
+                        cssVar('--primary') || '#a855f7',
+                        cssVar('--pink') || '#ec4899',
+                        cssVar('--blue') || '#3b82f6',
+                        cssVar('--amber') || '#f59e0b',
+                        cssVar('--green') || '#10b981'
+                    ],
+                    borderWidth: 0,
+                    hoverOffset: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'right',
+                        labels: { color: cssVar('--text') || '#fff', font: { family: 'Inter' } }
+                    }
+                }
+            }
+        });
     },
 
     updateGenreDropdowns() {
@@ -1033,6 +1235,30 @@ const App = {
                 `;
             }).join('');
         }
+        
+        // Init SortableJS if no filters/sort applied
+        if (sort === 'added' && !search && filter === 'all' && genreFilter === 'all' && filtered.length > 1) {
+            if (this.movieSortable) this.movieSortable.destroy();
+            this.movieSortable = Sortable.create(grid, {
+                animation: 150,
+                delay: 100, // For mobile touch drag
+                delayOnTouchOnly: true,
+                onEnd: (evt) => {
+                    const itemEl = evt.item;
+                    const oldIndex = evt.oldIndex;
+                    const newIndex = evt.newIndex;
+                    if (oldIndex !== newIndex) {
+                        // Reorder in state
+                        const movedItem = this.state.movies.splice(oldIndex, 1)[0];
+                        this.state.movies.splice(newIndex, 0, movedItem);
+                        this.save();
+                    }
+                }
+            });
+        } else if (this.movieSortable) {
+            this.movieSortable.destroy();
+            this.movieSortable = null;
+        }
     },
 
     renderSeries() {
@@ -1120,6 +1346,29 @@ const App = {
                 `;
             }).join('');
         }
+        
+        // Init SortableJS if no filters/sort applied
+        if (sort === 'added' && !search && filter === 'all' && genreFilter === 'all' && filtered.length > 1) {
+            if (this.seriesSortable) this.seriesSortable.destroy();
+            this.seriesSortable = Sortable.create(list, {
+                animation: 150,
+                delay: 100, // For mobile touch drag
+                delayOnTouchOnly: true,
+                onEnd: (evt) => {
+                    const oldIndex = evt.oldIndex;
+                    const newIndex = evt.newIndex;
+                    if (oldIndex !== newIndex) {
+                        // Reorder in state
+                        const movedItem = this.state.series.splice(oldIndex, 1)[0];
+                        this.state.series.splice(newIndex, 0, movedItem);
+                        this.save();
+                    }
+                }
+            });
+        } else if (this.seriesSortable) {
+            this.seriesSortable.destroy();
+            this.seriesSortable = null;
+        }
     },
 
     openMovieDetail(id) {
@@ -1169,25 +1418,42 @@ const App = {
         
         this.editingId = id;
         
-        const epsPerSeason = Math.ceil(s.episodes / s.seasons);
         let seasonsHtml = '';
         
-        for (let i = 1; i <= s.seasons; i++) {
-            let epsHtml = '';
-            const epsInThisSeason = i === s.seasons ? (s.episodes - (i-1)*epsPerSeason) : epsPerSeason;
-            
-            for (let j = 1; j <= epsInThisSeason; j++) {
-                const epId = `${i}-${j}`;
-                const isWatched = (s.watchedEps || []).includes(epId);
-                epsHtml += `<button class="ep-btn ${isWatched ? 'watched' : ''}" onclick="App.toggleEpisode('${id}', '${epId}', this)">${j}</button>`;
+        if (s.seasonsData && s.seasonsData.length > 0) {
+            s.seasonsData.forEach(sd => {
+                let epsHtml = '';
+                for (let j = 1; j <= sd.episodes; j++) {
+                    const epId = `${sd.season}-${j}`;
+                    const isWatched = (s.watchedEps || []).includes(epId);
+                    epsHtml += `<button class="ep-btn ${isWatched ? 'watched' : ''}" onclick="App.toggleEpisode('${id}', '${epId}', this)">${j}</button>`;
+                }
+                seasonsHtml += `
+                    <div class="season-block">
+                        <h4>Sezon ${sd.season}</h4>
+                        <div class="eps-grid">${epsHtml}</div>
+                    </div>
+                `;
+            });
+        } else {
+            const epsPerSeason = Math.ceil(s.episodes / s.seasons);
+            for (let i = 1; i <= s.seasons; i++) {
+                let epsHtml = '';
+                const epsInThisSeason = i === s.seasons ? (s.episodes - (i-1)*epsPerSeason) : epsPerSeason;
+                
+                for (let j = 1; j <= epsInThisSeason; j++) {
+                    const epId = `${i}-${j}`;
+                    const isWatched = (s.watchedEps || []).includes(epId);
+                    epsHtml += `<button class="ep-btn ${isWatched ? 'watched' : ''}" onclick="App.toggleEpisode('${id}', '${epId}', this)">${j}</button>`;
+                }
+                
+                seasonsHtml += `
+                    <div class="season-block">
+                        <h4>Sezon ${i}</h4>
+                        <div class="eps-grid">${epsHtml}</div>
+                    </div>
+                `;
             }
-            
-            seasonsHtml += `
-                <div class="season-block">
-                    <h4>Sezon ${i}</h4>
-                    <div class="eps-grid">${epsHtml}</div>
-                </div>
-            `;
         }
 
         let starsInteractive = `<div class="interactive-stars" style="margin-top: 10px; display: flex; align-items: center; justify-content: center; gap: 4px;">`;
@@ -1577,6 +1843,9 @@ const App = {
     // ==========================================
 
     renderSocialTab(query = '') {
+        this.renderAiSuggestion();
+        this.initWatchParty();
+
         const list = document.getElementById('usersList');
         if (!list) return;
 
@@ -1603,21 +1872,176 @@ const App = {
             }
 
             return `
-            <div class="user-card" onclick="App.openOtherProfile('${u.handle}')" style="flex-direction:column; align-items:flex-start; position:relative;">
+            <div class="user-card" onclick="App.openOtherProfile('${u.handle}')" style="flex-direction:column; align-items:flex-start; position:relative; background:var(--bg2); padding:16px; border-radius:12px; border:1px solid var(--border); cursor:pointer;">
                 ${unreadCount > 0 ? `<div style="position:absolute; top:-6px; right:-6px; background:var(--red); color:white; font-size:12px; font-weight:bold; width:22px; height:22px; border-radius:50%; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 5px rgba(0,0,0,0.3); z-index:2;">${unreadCount > 9 ? '9+' : unreadCount}</div>` : ''}
                 <div style="display:flex; align-items:center; gap:12px; width:100%;">
-                    <div class="user-avatar">${u.avatar || '👨'}</div>
-                    <div class="user-info">
-                        <span class="user-name">${u.name}</span>
-                        <span class="user-handle">@${u.handle}</span>
+                    <div class="user-avatar" style="font-size:32px;">${u.avatar || '👨'}</div>
+                    <div class="user-info" style="display:flex; flex-direction:column; align-items:flex-start;">
+                        <span class="user-name" style="font-size:14px; font-weight:700;">${u.name}</span>
+                        <span class="user-handle" style="font-size:12px; color:var(--text2);">@${u.handle}</span>
                     </div>
                 </div>
                 <div style="font-size:12px; color:var(--text3); margin-top:8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; width:100%;">
                     ${lastMsgText}
                 </div>
             </div>
-        `}).join('');
+            `;
+        }).join('');
     },
+
+    async renderAiSuggestion() {
+        const box = document.getElementById('aiSuggestionBox');
+        if (!box) return;
+
+        let allItems = [...this.state.movies, ...this.state.series];
+        let watched = allItems.filter(i => i.status === 'watched' || i.status === 'completed');
+        
+        if (watched.length === 0) {
+            box.innerHTML = `<div class="empty-widget" style="width:100%; text-align:center;">Öneri alabilmek için kütüphanene birkaç içerik ekle!</div>`;
+            return;
+        }
+
+        // Bul the highest rated item
+        let highest = watched.reduce((prev, current) => (prev.rating > current.rating) ? prev : current);
+        
+        box.innerHTML = `<div class="tmdb-loading" style="width:100%;">Öneri hazırlanıyor... 🤖</div>`;
+
+        try {
+            const genreQuery = highest.genre ? highest.genre.split(',')[0].trim() : '';
+            const genreId = this.getGenreIdByName(genreQuery);
+            const endpoint = highest.type === 'movie' ? 'movie' : 'tv';
+            const appType = highest.type === 'movie' ? 'movie' : 'series';
+            
+            let url = `https://api.themoviedb.org/3/discover/${endpoint}?api_key=${TMDB_API_KEY}&language=tr-TR&sort_by=popularity.desc`;
+            if (genreId) url += `&with_genres=${genreId}`;
+            
+            const res = await fetch(url);
+            const data = await res.json();
+            
+            if (data.results && data.results.length > 0) {
+                // Filter out items already in the library
+                const unseen = data.results.filter(r => {
+                    const t = r.title || r.name;
+                    return !allItems.some(a => a.title.toLowerCase() === t.toLowerCase());
+                });
+                const rec = unseen.length > 0 ? unseen[Math.floor(Math.random() * Math.min(5, unseen.length))] : data.results[0];
+                
+                const recTitle = rec.title || rec.name;
+                const poster = rec.poster_path ? `https://image.tmdb.org/t/p/w200${rec.poster_path}` : '';
+                const dateField = rec.release_date || rec.first_air_date;
+                const year = dateField ? dateField.split('-')[0] : '';
+                
+                box.innerHTML = `
+                    <div style="flex:1; min-width: 0; width: 100%;">
+                        <p style="font-size:12px; color:var(--text2); margin-bottom:8px;"><strong>${highest.title}</strong> sevdin, bunu da seveceksin:</p>
+                        <div style="display:flex; gap:12px; align-items:center; background:rgba(0,0,0,0.2); padding:12px; border-radius:8px; cursor:pointer; transition: transform 0.2s;" onmouseover="this.style.transform='translateY(-4px)'" onmouseout="this.style.transform='translateY(0)'" onclick="App.searchAndAdd('${recTitle.replace(/'/g, "\\'")}', '${appType}', '${rec.id}')">
+                            <img src="${poster}" style="width:60px; height:90px; object-fit:cover; border-radius:6px; flex-shrink: 0;" onerror="this.style.display='none'" />
+                            <div style="flex: 1; min-width: 0;">
+                                <div style="font-size:14px; font-weight:bold; color:var(--primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${recTitle}</div>
+                                <div style="font-size:12px; color:var(--text3);">${year} ${genreQuery ? `• ${genreQuery}` : ''} • ${appType === 'movie' ? 'Film' : 'Dizi'}</div>
+                                <div style="font-size:12px; margin-top:4px; font-weight:bold;">✨ Hemen Ekle</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                box.innerHTML = `<div class="empty-widget" style="width:100%; text-align:center;">Şu an için yeni bir öneri bulamadık.</div>`;
+            }
+        } catch (e) {
+            box.innerHTML = `<div class="empty-widget" style="width:100%; text-align:center;">Öneri alınamadı.</div>`;
+        }
+    },
+
+    getGenreIdByName(name) {
+        if (!name) return null;
+        const map = {
+            'aksiyon': 28, 'action': 28, 'macera': 12, 'adventure': 12,
+            'animasyon': 16, 'animation': 16, 'komedi': 35, 'comedy': 35,
+            'suç': 80, 'crime': 80, 'belgesel': 99, 'documentary': 99,
+            'dram': 18, 'drama': 18, 'aile': 10751, 'family': 10751,
+            'fantastik': 14, 'fantasy': 14, 'tarih': 36, 'history': 36,
+            'korku': 27, 'horror': 27, 'müzik': 10402, 'music': 10402,
+            'gizem': 9648, 'mystery': 9648, 'romantik': 10749, 'romance': 10749,
+            'bilim kurgu': 878, 'sci-fi': 878, 'science fiction': 878,
+            'gerilim': 53, 'thriller': 53, 'savaş': 10752, 'war': 10752
+        };
+        return map[name.toLowerCase()] || null;
+    },
+
+    searchAndAdd(keyword, type = 'movie', tmdbId = null) {
+        this.switchTab('dashboard');
+        this.openAddModal(type);
+        document.getElementById('formTitle').value = keyword;
+        if (tmdbId) {
+            this.selectTMDBItem(tmdbId, type);
+        } else {
+            this.searchTMDB(keyword);
+        }
+    },
+
+    initWatchParty() {
+        const btn = document.getElementById('btnCreateWatchParty');
+        if (!btn || btn.dataset.bound) return;
+        btn.dataset.bound = 'true';
+
+        btn.addEventListener('click', () => {
+            document.getElementById('watchPartyModal').classList.add('open');
+            document.getElementById('watchPartyChat').innerHTML = `<div style="font-size:12px; color:var(--text3); text-align:center;">Odaya katıldınız. Arkadaşlarınızı bekleyin.</div>`;
+            document.getElementById('watchTimer').innerText = '00:00:00';
+            clearInterval(this.watchInterval);
+        });
+
+        document.getElementById('watchPartyCloseBtn').addEventListener('click', () => {
+            document.getElementById('watchPartyModal').classList.remove('open');
+            clearInterval(this.watchInterval);
+        });
+
+        document.getElementById('btnSyncTimer').addEventListener('click', (e) => {
+            if (e.target.innerText.includes('Başlat')) {
+                e.target.innerText = '⏸️ Durdur';
+                let sec = 0;
+                this.watchInterval = setInterval(() => {
+                    sec++;
+                    const h = String(Math.floor(sec / 3600)).padStart(2, '0');
+                    const m = String(Math.floor((sec % 3600) / 60)).padStart(2, '0');
+                    const s = String(sec % 60).padStart(2, '0');
+                    document.getElementById('watchTimer').innerText = `${h}:${m}:${s}`;
+                }, 1000);
+                this.addWatchChatSystemMsg('Film başlatıldı!');
+            } else {
+                e.target.innerText = '▶️ Başlat / Senkronize Et';
+                clearInterval(this.watchInterval);
+                this.addWatchChatSystemMsg('Film duraklatıldı.');
+            }
+        });
+
+        document.getElementById('wpChatSendBtn').addEventListener('click', () => {
+            const input = document.getElementById('wpChatInput');
+            if(input.value.trim()) {
+                this.addWatchChatMsg(this.currentUser, input.value.trim());
+                input.value = '';
+            }
+        });
+        document.getElementById('wpChatInput').addEventListener('keypress', (e) => {
+            if(e.key === 'Enter') document.getElementById('wpChatSendBtn').click();
+        });
+    },
+
+    addWatchChatSystemMsg(msg) {
+        const chat = document.getElementById('watchPartyChat');
+        chat.innerHTML += `<div style="font-size:12px; color:var(--primary); text-align:center; margin: 4px 0;">-- ${msg} --</div>`;
+        chat.scrollTop = chat.scrollHeight;
+    },
+
+    addWatchChatMsg(user, msg) {
+        const chat = document.getElementById('watchPartyChat');
+        chat.innerHTML += `<div style="font-size:13px; margin: 4px 0;"><strong>@${user}:</strong> <span style="color:var(--text2);">${msg}</span></div>`;
+        chat.scrollTop = chat.scrollHeight;
+    },
+
+    // ==========================================
+    // OTHER METHODS
+    // ==========================================
 
     updateUnreadBadges() {
         if (!this.currentUser) return;

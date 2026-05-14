@@ -92,6 +92,16 @@ html, body {
   overflow: hidden;
 }
 
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjOTRhM2I4IiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBvbHlsaW5lIHBvaW50cz0iNiA5IDEyIDE1IDE4IDkiPjwvcG9seWxpbmU+PC9zdmc+");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 14px;
+  padding-right: 32px !important;
+}
+
 /* SPLASH */
 .splash {
   position: fixed; inset: 0; z-index: 9999;
@@ -301,7 +311,7 @@ html, body {
 .filter-btn { flex-shrink: 0; padding: 7px 14px; border-radius: 20px; border: 1px solid var(--border); background: var(--bg3); color: var(--text2); font-size: 12px; font-weight: 500; cursor: pointer; transition: var(--transition); font-family: 'Inter', sans-serif; }
 .filter-btn.active { background: linear-gradient(135deg, var(--purple), var(--indigo)); color: white; border-color: transparent; }
 .sort-bar { margin-bottom: 14px; }
-.sort-select { background: var(--bg3); border: 1px solid var(--border); color: var(--text2); padding: 7px 12px; border-radius: var(--radius-sm); font-size: 12px; outline: none; font-family: 'Inter', sans-serif; cursor: pointer; }
+.sort-select { background-color: var(--bg3); border: 1px solid var(--border); color: var(--text2); padding: 7px 12px; border-radius: var(--radius-sm); font-size: 12px; outline: none; font-family: 'Inter', sans-serif; cursor: pointer; }
 
 /* CONTENT GRID - Movies */
 .content-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
@@ -421,7 +431,7 @@ html, body {
 .form-group { margin-bottom: 14px; }
 .form-group label { display: block; font-size: 12px; color: var(--text2); margin-bottom: 6px; font-weight: 500; }
 .form-group input, .form-group select, .form-group textarea {
-  width: 100%; background: var(--bg3); border: 1px solid var(--border);
+  width: 100%; background-color: var(--bg3); border: 1px solid var(--border);
   border-radius: var(--radius-sm); color: var(--text); padding: 10px 12px;
   font-size: 14px; font-family: 'Inter', sans-serif; outline: none;
   transition: border-color 0.2s;
@@ -488,7 +498,7 @@ html, body {
 .detail-tag { background: var(--card2); padding: 4px 10px; border-radius: 20px; font-size: 11px; color: var(--text2); }
 .detail-rating { font-size: 16px; color: var(--amber); margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
 .detail-note { background: var(--bg); padding: 12px; border-radius: var(--radius-sm); font-size: 13px; color: var(--text2); line-height: 1.5; border: 1px dashed var(--border); margin-bottom: 16px; }
-.detail-status-select { background: var(--bg3); color: var(--text); border: 1px solid var(--border); padding: 6px 12px; border-radius: var(--radius-sm); font-size: 12px; outline: none; cursor: pointer; }
+.detail-status-select { background-color: var(--bg3); color: var(--text); border: 1px solid var(--border); padding: 6px 12px; border-radius: var(--radius-sm); font-size: 12px; outline: none; cursor: pointer; }
 .detail-seasons h3 { font-size: 14px; font-weight: 600; color: var(--text2); margin-bottom: 10px; }
 
 /* BUTTONS */

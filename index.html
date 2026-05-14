@@ -12,6 +12,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/color-thief/2.3.0/color-thief.umd.js"></script>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -22,6 +25,10 @@
       <h2>CineTrack'e Hoşgeldin</h2>
       <p>Kendi izleme listeni oluşturmak için bir profil adı gir.</p>
       <input type="text" id="usernameInput" placeholder="Kullanıcı adınız (@handle)..." autocomplete="off"/>
+      <div style="position:relative; margin-top:8px;">
+        <input type="password" id="passwordInput" placeholder="Şifreniz..." autocomplete="off" style="width:100%; padding-right:40px;"/>
+        <button type="button" class="toggle-password" data-target="passwordInput" style="position:absolute; right:10px; top:50%; transform:translateY(-50%); background:none; border:none; color:var(--text3); cursor:pointer; font-size:16px;">👁️</button>
+      </div>
       <button class="btn-primary" id="loginBtn" style="width: 100%; margin-top: 16px;">Giriş Yap</button>
       <div style="margin-top:16px; text-align:center; font-size:13px; color:var(--text2);">
         Hesabın yok mu? <span style="color:var(--primary); cursor:pointer;" id="showRegisterBtn">Hesap Oluştur</span>
@@ -41,6 +48,11 @@
       </div>
       <input type="text" id="regNameInput" placeholder="Ad Soyad..." autocomplete="off"/>
       <input type="text" id="regHandleInput" placeholder="Kullanıcı Adı (@handle)..." autocomplete="off" style="margin-top:8px;"/>
+      <div id="handleSuggestion" style="color:var(--amber); font-size:11px; text-align:left; margin-top:4px; display:none; cursor:pointer;"></div>
+      <div style="position:relative; margin-top:8px;">
+        <input type="password" id="regPasswordInput" placeholder="Şifre Oluşturun..." autocomplete="off" style="width:100%; padding-right:40px;"/>
+        <button type="button" class="toggle-password" data-target="regPasswordInput" style="position:absolute; right:10px; top:50%; transform:translateY(-50%); background:none; border:none; color:var(--text3); cursor:pointer; font-size:16px;">👁️</button>
+      </div>
       <button class="btn-primary" id="registerBtn" style="width: 100%; margin-top: 16px;">Kayıt Ol</button>
       <div style="margin-top:16px; text-align:center; font-size:13px; color:var(--text2);">
         Zaten hesabın var mı? <span style="color:var(--primary); cursor:pointer;" id="showLoginBtn">Giriş Yap</span>
@@ -300,6 +312,32 @@
           </div>
         </div>
 
+        <!-- Badges & Streak Section -->
+        <div class="widget stats-widget" style="margin-bottom: 24px;">
+          <h3 class="widget-title">🎖️ Başarımlar & Seri</h3>
+          <div class="stats-row" style="margin-bottom: 16px;">
+            <div class="stat-card" style="flex:1;">
+              <span class="stat-num" id="statStreak" style="color: var(--amber);">🔥 0</span>
+              <span class="stat-label">Giriş Serisi</span>
+            </div>
+            <div class="stat-card" style="flex:1;">
+              <span class="stat-num" id="statBadgeCount">0</span>
+              <span class="stat-label">Kazanılan Rozet</span>
+            </div>
+          </div>
+          <div id="badgesList" style="display:flex; gap:10px; overflow-x:auto; padding-bottom: 8px;">
+            <div class="empty-widget" style="width:100%; text-align:center;">Henüz rozet kazanılmadı</div>
+          </div>
+        </div>
+
+        <!-- Advanced Stats (Chart.js) -->
+        <div class="widget stats-widget" style="margin-bottom: 24px;">
+          <h3 class="widget-title">📈 Gelişmiş İstatistikler</h3>
+          <div style="position: relative; height: 250px; width: 100%;">
+            <canvas id="genreChart"></canvas>
+          </div>
+        </div>
+
         <div class="profile-actions" style="display: flex; gap: 12px; margin-bottom: 24px;">
           <button class="btn-primary" id="btnWrapped" style="flex:1; background: linear-gradient(135deg, #f59e0b, #ec4899);">🎉 2026 Özetini Gör</button>
           <button class="btn-primary" id="btnFriendList" style="flex:1; background: linear-gradient(135deg, #3b82f6, #06b6d4);">🤝 Ortak Liste</button>
@@ -325,6 +363,7 @@
               <div class="theme-preview" style="background: linear-gradient(135deg, #3b82f6, #06b6d4);"></div>
               <div class="theme-name">Buzul Mavisi</div>
             </div>
+
             <!-- Easter Egg Theme -->
             <div class="theme-card" id="themeDeniz" style="display: none;" data-theme="deniz" onclick="App.changeTheme('deniz')">
               <div class="theme-preview" style="background: linear-gradient(135deg, #1e3a8a, #facc15);"></div>
@@ -344,6 +383,27 @@
         <div class="search-bar" style="margin-bottom: 24px;">
           <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
           <input type="text" id="socialSearchInput" placeholder="Kullanıcı ara (@handle veya isim)..." autocomplete="off" />
+        </div>
+
+        <!-- AI Suggestion -->
+        <div class="widget stats-widget" style="margin-bottom: 24px; background: linear-gradient(135deg, rgba(139,92,246,0.1), rgba(236,72,153,0.1)); border: 1px solid rgba(139,92,246,0.3);">
+          <h3 class="widget-title" style="display:flex; align-items:center; gap:8px;">
+            <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            Yapay Zeka Önerisi
+          </h3>
+          <div id="aiSuggestionBox" style="display:flex; gap:12px; align-items:center;">
+            <div class="empty-widget" style="width:100%; text-align:center;">Öneri alabilmek için kütüphanene birkaç içerik ekle!</div>
+          </div>
+        </div>
+
+        <!-- Watch Party -->
+        <div class="widget stats-widget" style="margin-bottom: 24px;">
+          <h3 class="widget-title" style="display:flex; align-items:center; gap:8px;">
+            <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+            Ortak İzleme Odaları
+          </h3>
+          <p style="font-size:13px; color:var(--text2); margin-bottom:12px;">Arkadaşlarınla senkronize film izle ve sohbet et!</p>
+          <button class="btn-primary" id="btnCreateWatchParty" style="width:100%;">Oda Oluştur</button>
         </div>
 
         <h3 style="font-size: 15px; font-weight: 600; margin-bottom: 12px;">Topluluk (Beta)</h3>
@@ -635,6 +695,34 @@
         <button class="chat-send-btn" id="chatSendBtn">
           <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="margin-right:2px; margin-top:2px;"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
         </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Watch Party Modal -->
+  <div class="modal-overlay" id="watchPartyModal" style="z-index: 2000;">
+    <div class="modal" style="display:flex; flex-direction:column; padding:0;">
+      <div class="modal-header" style="border-bottom: 1px solid var(--border); padding: 16px; background: var(--bg2); border-radius: 16px 16px 0 0;">
+        <h2 style="font-size:18px;">🍿 Watch Party Odası</h2>
+        <button class="modal-close" id="watchPartyCloseBtn" style="position:static;">✕</button>
+      </div>
+      <div class="modal-body" style="padding: 16px; display:flex; flex-direction:column; gap:16px;">
+        <div style="background: #000; border-radius: 8px; aspect-ratio: 16/9; display:flex; align-items:center; justify-content:center; position:relative;">
+          <span style="color:#555;">Video Oynatıcı Bekleniyor...</span>
+          <div style="position:absolute; bottom: 10px; left: 10px; background: rgba(0,0,0,0.7); padding:4px 8px; border-radius:4px; font-family:monospace; color:var(--primary);">
+            <span id="watchTimer">00:00:00</span>
+          </div>
+        </div>
+        <div style="display:flex; gap:10px;">
+          <button class="btn-primary" id="btnSyncTimer" style="flex:1;">▶️ Başlat / Senkronize Et</button>
+        </div>
+        <div style="border: 1px solid var(--border); border-radius:8px; height: 150px; overflow-y:auto; padding:8px; display:flex; flex-direction:column; gap:8px;" id="watchPartyChat">
+          <div style="font-size:12px; color:var(--text3); text-align:center;">Odaya katıldınız. Arkadaşlarınızı bekleyin.</div>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <input type="text" id="wpChatInput" placeholder="Sohbet et..." autocomplete="off" style="flex:1; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text);" />
+          <button class="btn-primary" id="wpChatSendBtn" style="padding:8px 16px;">Gönder</button>
+        </div>
       </div>
     </div>
   </div>
