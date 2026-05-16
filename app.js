@@ -32,7 +32,9 @@ const App = {
         lastWatchDate: null,
         globalUsers: [],
         currentUserData: null,
-        hiddenChats: []
+        hiddenChats: [],
+        dailyPageGoal: 20,
+        collections: []
     },
     
     currentTab: 'dashboard',
@@ -52,6 +54,7 @@ const App = {
     },
 
     init() {
+        console.log('App: init() started');
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('./sw.js').catch(err => console.log('SW fail', err));
         }
@@ -168,13 +171,21 @@ const App = {
         // FIREBASE AUTH STATE OBSERVER
         if (auth) {
             auth.onAuthStateChanged(async (firebaseUser) => {
-                if (firebaseUser) {
+                console.log('App: Auth state changed', !!firebaseUser);
+                if (firebaseUser && firebaseUser.email) {
                     // Extract handle from email
                     const handle = firebaseUser.email.replace('@cinetrack.app', '');
                     await this.login(handle, firebaseUser);
-                    document.getElementById('splash').classList.add('hidden');
-                    document.getElementById('loginScreen').classList.add('hidden');
-                    document.getElementById('app').classList.remove('hidden');
+                    
+                    const splash = document.getElementById('splash');
+                    if (splash) splash.classList.add('hidden');
+                    
+                    const ls = document.getElementById('loginScreen');
+                    if (ls) ls.classList.add('hidden');
+                    
+                    const app = document.getElementById('app');
+                    if (app) app.classList.remove('hidden');
+                    
                     this.setAuthLoading(false);
                 } else {
                     // Not logged in
@@ -228,7 +239,11 @@ const App = {
 
         const userRecord = this.state.currentUserData || { handle: this.currentUser, name: username, avatar: '👤' };
 
-        document.getElementById('userNameDisplay').innerText = userRecord.name || this.currentUser;
+        const und = document.getElementById('userNameDisplay');
+        if (und) und.innerText = userRecord.name || this.currentUser;
+
+        const pad = document.getElementById('profileAvatarDisplay');
+        if (pad) pad.innerText = userRecord.avatar || '👤';
         
         const profileUserName = document.getElementById('profileUserNameFull');
         if (profileUserName) {
@@ -246,6 +261,13 @@ const App = {
         if (navSocial) {
             const canSeeSocial = ['deniz', 'kermode'].includes(this.currentUser);
             navSocial.style.display = canSeeSocial ? 'flex' : 'none';
+        }
+        
+        // Tab içeriğini de gizleyelim (ek güvenlik)
+        const tabSocial = document.getElementById('tab-social');
+        if (tabSocial) {
+            const canSeeSocial = ['deniz', 'kermode'].includes(this.currentUser);
+            if (!canSeeSocial) tabSocial.innerHTML = '<div style="padding:40px; text-align:center; color:var(--text3);">Bu bölüme erişim yetkiniz yok.</div>';
         }
         
         // Data Migration / Loading (localStorage – will move to Firestore in Step 2)
@@ -294,6 +316,8 @@ const App = {
                     this.state.followRequests = d.followRequests || [];
                     this.state.sentRequests   = d.sentRequests   || [];
                     this.state.hiddenChats    = d.hiddenChats    || [];
+                    this.state.collections    = d.collections    || [];
+                    this.state.dailyPageGoal  = d.dailyPageGoal  || 20;
                 } else {
                     // First login — check for legacy localStorage data to migrate
                     const legacyMovies = localStorage.getItem(`cinetrack_${this.currentUser}_movies`);
@@ -325,6 +349,8 @@ const App = {
                         this.state.followRequests = d.followRequests || [];
                         this.state.sentRequests   = d.sentRequests   || [];
                         this.state.hiddenChats    = d.hiddenChats    || [];
+                        this.state.collections    = d.collections    || [];
+                        this.state.dailyPageGoal  = d.dailyPageGoal  || 20;
 
                         this.renderFollowRequestsUI();
                         if (this.currentTab === 'social') {
@@ -469,7 +495,9 @@ const App = {
             streak: this.state.streak,
             lastWatchDate: this.state.lastWatchDate || null,
             following: this.state.following,
-            hiddenChats: this.state.hiddenChats || []
+            hiddenChats: this.state.hiddenChats || [],
+            collections: this.state.collections || [],
+            dailyPageGoal: this.state.dailyPageGoal || 20
         };
         if (db) {
             db.collection('userData').doc(this.currentUser).set(payload, { merge: true })
@@ -491,30 +519,43 @@ const App = {
         });
 
         // Search
-        document.getElementById('searchToggleBtn').addEventListener('click', () => {
-            document.getElementById('searchBarWrap').classList.toggle('open');
-            document.getElementById('searchInput').focus();
+        const st = document.getElementById('searchToggleBtn');
+        if (st) st.addEventListener('click', () => {
+            const sw = document.getElementById('searchBarWrap');
+            if (sw) sw.classList.toggle('open');
+            const si = document.getElementById('searchInput');
+            if (si) si.focus();
         });
-        document.getElementById('searchClearBtn').addEventListener('click', () => {
-            document.getElementById('searchInput').value = '';
-            document.getElementById('globalSearchResults').classList.add('hidden');
+
+        const scb = document.getElementById('searchClearBtn');
+        if (scb) scb.addEventListener('click', () => {
+            const si = document.getElementById('searchInput');
+            if (si) si.value = '';
+            const gsr = document.getElementById('globalSearchResults');
+            if (gsr) gsr.classList.add('hidden');
             this.renderMovies();
             this.renderSeries();
+            this.renderBooks();
         });
-        document.getElementById('searchInput').addEventListener('input', (e) => {
+
+        const si = document.getElementById('searchInput');
+        if (si) si.addEventListener('input', (e) => {
             const query = e.target.value.trim().toLocaleLowerCase('tr');
             const resContainer = document.getElementById('globalSearchResults');
+            if (!resContainer) return;
             
             if (query.length < 2) {
                 resContainer.classList.add('hidden');
                 this.renderMovies();
                 this.renderSeries();
+                this.renderBooks();
                 return;
             }
 
             // Global Search Results
-            const matchedMovies = this.state.movies.filter(m => m.title.toLocaleLowerCase('tr').includes(query));
-            const matchedSeries = this.state.series.filter(s => s.title.toLocaleLowerCase('tr').includes(query));
+            const matchedMovies = (this.state.movies || []).filter(m => m.title.toLocaleLowerCase('tr').includes(query));
+            const matchedSeries = (this.state.series || []).filter(s => s.title.toLocaleLowerCase('tr').includes(query));
+            const matchedBooks  = (this.state.books  || []).filter(b => b.title.toLocaleLowerCase('tr').includes(query));
             
             let html = '';
             
@@ -544,6 +585,20 @@ const App = {
                 `;
             });
 
+            matchedBooks.forEach(b => {
+                const cover = b.poster || b.cover;
+                const posterHtml = cover ? `<img src="${cover}" style="width:100%;height:100%;object-fit:cover;border-radius:6px;"/>` : '📚';
+                html += `
+                    <div class="tmdb-item" onclick="document.getElementById('globalSearchResults').classList.add('hidden'); App.openBookDetail('${b.id}')">
+                        <div class="tmdb-poster">${posterHtml}</div>
+                        <div class="tmdb-info">
+                            <div class="tmdb-title">${b.title}</div>
+                            <div class="tmdb-year">📚 Kitap ${b.year ? '- '+b.year : ''}</div>
+                        </div>
+                    </div>
+                `;
+            });
+
             if (html === '') {
                 html = '<div class="tmdb-loading">Sonuç bulunamadı.</div>';
             }
@@ -554,48 +609,67 @@ const App = {
             // Render current tabs as well
             this.renderMovies();
             this.renderSeries();
+            this.renderBooks();
         });
 
         // Add Modal
-        document.getElementById('addBtn').addEventListener('click', () => this.openAddModal('movie'));
-        document.getElementById('addFirstMovieBtn').addEventListener('click', () => {
+        const addBtn = document.getElementById('addBtn');
+        if (addBtn) addBtn.addEventListener('click', () => this.openAddModal('movie'));
+
+        const afm = document.getElementById('addFirstMovieBtn');
+        if (afm) afm.addEventListener('click', () => {
             this.switchTab('movies');
             this.openAddModal('movie');
         });
-        document.getElementById('addFirstSeriesBtn').addEventListener('click', () => {
+
+        const afs = document.getElementById('addFirstSeriesBtn');
+        if (afs) afs.addEventListener('click', () => {
             this.switchTab('series');
             this.openAddModal('series');
         });
-        document.getElementById('modalCloseBtn').addEventListener('click', () => this.closeModals());
-        document.getElementById('modalCancelBtn').addEventListener('click', () => this.closeModals());
+
+        const mcb = document.getElementById('modalCloseBtn');
+        if (mcb) mcb.addEventListener('click', () => this.closeModals());
+        
+        const mcan = document.getElementById('modalCancelBtn');
+        if (mcan) mcan.addEventListener('click', () => this.closeModals());
 
         document.querySelectorAll('.type-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
-                if (this.editingId) return; // Prevent changing type while editing
                 const type = e.currentTarget.dataset.type;
-
-                // Book type → open separate book modal
-                if (type === 'book') {
-                    this.closeModals();
-                    this.openBookModal();
-                    return;
-                }
-
                 document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('active'));
                 e.currentTarget.classList.add('active');
                 
+                const tmdbResults = document.getElementById('tmdbResults');
+                const bookResults = document.getElementById('bookSearchResults');
+                if (tmdbResults) tmdbResults.classList.add('hidden');
+                if (bookResults) bookResults.classList.add('hidden');
+
                 if (type === 'movie') {
                     document.getElementById('movieFields').classList.remove('hidden');
                     document.getElementById('seriesFields').classList.add('hidden');
-                } else {
+                    document.getElementById('bookFields').classList.add('hidden');
+                    document.getElementById('platformFieldWrap').classList.remove('hidden');
+                    document.getElementById('formTitle').placeholder = 'Film adı yazın...';
+                } else if (type === 'series') {
                     document.getElementById('movieFields').classList.add('hidden');
                     document.getElementById('seriesFields').classList.remove('hidden');
+                    document.getElementById('bookFields').classList.add('hidden');
+                    document.getElementById('platformFieldWrap').classList.remove('hidden');
+                    document.getElementById('formTitle').placeholder = 'Dizi adı yazın...';
+                } else if (type === 'book') {
+                    document.getElementById('movieFields').classList.add('hidden');
+                    document.getElementById('seriesFields').classList.add('hidden');
+                    document.getElementById('bookFields').classList.remove('hidden');
+                    document.getElementById('platformFieldWrap').classList.add('hidden');
+                    document.getElementById('formTitle').placeholder = 'Kitap adı yazın...';
                 }
                 
-                // Re-trigger TMDB search with the new type
+                // Re-trigger search with the new type
                 const currentTitle = document.getElementById('formTitle').value.trim();
                 if (currentTitle.length >= 2) {
-                    this.searchTMDB(currentTitle);
+                    if (type === 'book') this.searchOpenLibrary(currentTitle);
+                    else this.searchTMDB(currentTitle);
                 }
             });
         });
@@ -631,16 +705,22 @@ const App = {
             });
         });
 
-        // TMDB Search (Real-time) on formTitle
+        // Search (Real-time) on formTitle
         let tmdbTimeout = null;
         document.getElementById('formTitle').addEventListener('input', (e) => {
             clearTimeout(tmdbTimeout);
             const val = e.target.value.trim();
             if (val.length < 2) {
                 document.getElementById('tmdbResults').classList.add('hidden');
+                document.getElementById('bookSearchResults').classList.add('hidden');
                 return;
             }
-            tmdbTimeout = setTimeout(() => this.searchTMDB(val), 500);
+            const type = document.querySelector('.type-btn.active').dataset.type;
+            if (type === 'book') {
+                tmdbTimeout = setTimeout(() => this.searchOpenLibrary(val), 600);
+            } else {
+                tmdbTimeout = setTimeout(() => this.searchTMDB(val), 500);
+            }
         });
 
         // Save Form
@@ -818,7 +898,8 @@ const App = {
     switchTab(tab) {
         this.currentTab = tab;
         document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
-        document.querySelector(`.nav-item[data-tab="${tab}"]`).classList.add('active');
+        const navItem = document.querySelector(`.nav-item[data-tab="${tab}"]`);
+        if (navItem) navItem.classList.add('active');
         
         document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
         document.getElementById(`tab-${tab}`).classList.add('active');
@@ -827,7 +908,15 @@ const App = {
         if (tab === 'movies') this.renderMovies();
         if (tab === 'series') this.renderSeries();
         if (tab === 'books') this.renderBooks();
-        if (tab === 'social') this.renderSocialTab();
+        if (tab === 'social') {
+            const canSeeSocial = ['deniz', 'kermode'].includes(this.currentUser);
+            if (!canSeeSocial) {
+                this.showToast('Bu sekme henüz size açık değil 🔒');
+                this.switchTab('dashboard');
+                return;
+            }
+            this.renderSocialTab();
+        }
         // Profile tab doesn't need specific render logic right now
     },
 
@@ -950,6 +1039,7 @@ const App = {
         document.getElementById('modalTitle').innerText = 'Yeni Ekle';
         document.getElementById('typeSelectorWrap').classList.remove('hidden');
         document.getElementById('tmdbResults').classList.add('hidden');
+        document.getElementById('bookSearchResults').classList.add('hidden');
         
         // Reset form
         document.getElementById('formTitle').value = '';
@@ -964,18 +1054,25 @@ const App = {
         document.getElementById('formSeriesStatus').value = 'watchlist';
         document.getElementById('formSeasons').value = '1';
         document.getElementById('formEpisodes').value = '1';
+
+        document.getElementById('bookAuthor').value = '';
+        document.getElementById('bookPages').value = '';
+        document.getElementById('bookStatus').value = 'readlist';
+
         this.tempSeasonsData = null;
         this.tempImdbId = null;
 
-        document.querySelector(`.type-btn[data-type="${type}"]`).click();
-        
         document.getElementById('addModal').classList.add('open');
+
+        const typeBtn = document.querySelector(`.type-btn[data-type="${type}"]`);
+        if (typeBtn) typeBtn.click();
     },
 
     openEditModal(type) {
-        const item = type === 'movie' 
-            ? this.state.movies.find(m => m.id === this.editingId)
-            : this.state.series.find(s => s.id === this.editingId);
+        let item;
+        if (type === 'movie') item = this.state.movies.find(m => m.id === this.editingId);
+        else if (type === 'series') item = this.state.series.find(s => s.id === this.editingId);
+        else if (type === 'book') item = this.state.books.find(b => b.id === this.editingId);
         
         if (!item) return;
 
@@ -983,6 +1080,7 @@ const App = {
         document.getElementById('modalTitle').innerText = 'Düzenle';
         document.getElementById('typeSelectorWrap').classList.add('hidden'); // Hide type switcher
         document.getElementById('tmdbResults').classList.add('hidden');
+        document.getElementById('bookSearchResults').classList.add('hidden');
         
         document.getElementById('formTitle').value = item.title;
         document.getElementById('formYear').value = item.year || '';
@@ -994,14 +1092,23 @@ const App = {
         if (type === 'movie') {
             document.getElementById('movieFields').classList.remove('hidden');
             document.getElementById('seriesFields').classList.add('hidden');
+            document.getElementById('bookFields').classList.add('hidden');
             document.getElementById('formMovieStatus').value = item.status;
             document.getElementById('formDuration').value = item.duration || '';
-        } else {
+        } else if (type === 'series') {
             document.getElementById('movieFields').classList.add('hidden');
             document.getElementById('seriesFields').classList.remove('hidden');
+            document.getElementById('bookFields').classList.add('hidden');
             document.getElementById('formSeriesStatus').value = item.status;
             document.getElementById('formSeasons').value = item.seasons || 1;
             document.getElementById('formEpisodes').value = item.episodes || 1;
+        } else if (type === 'book') {
+            document.getElementById('movieFields').classList.add('hidden');
+            document.getElementById('seriesFields').classList.add('hidden');
+            document.getElementById('bookFields').classList.remove('hidden');
+            document.getElementById('bookAuthor').value = item.author || '';
+            document.getElementById('bookPages').value = item.pages || '';
+            document.getElementById('bookStatus').value = item.status || 'readlist';
         }
 
         this.closeModals(false); // Close details modal without resetting edit state
@@ -1026,12 +1133,13 @@ const App = {
         // Duplication Check
         if (!isEdit) {
             const lowerTitle = title.toLowerCase();
-            const exists = type === 'movie' 
-                ? this.state.movies.some(m => m.title.toLowerCase() === lowerTitle)
-                : this.state.series.some(s => s.title.toLowerCase() === lowerTitle);
+            let exists = false;
+            if (type === 'movie') exists = this.state.movies.some(m => m.title.toLowerCase() === lowerTitle);
+            else if (type === 'series') exists = this.state.series.some(s => s.title.toLowerCase() === lowerTitle);
+            else if (type === 'book') exists = this.state.books.some(b => b.title.toLowerCase() === lowerTitle);
                 
             if (exists) {
-                return this.showToast('Bu yapım zaten kütüphanende ekli!', true);
+                return this.showToast('Bu içerik zaten kütüphanende ekli!', true);
             }
         }
 
@@ -1070,7 +1178,7 @@ const App = {
                 newItem.createdAt = Date.now();
                 this.state.movies.push(newItem);
             }
-        } else {
+        } else if (type === 'series') {
             const status = document.getElementById('formSeriesStatus').value;
             const seasons = parseInt(document.getElementById('formSeasons').value) || 1;
             const episodes = parseInt(document.getElementById('formEpisodes').value) || 1;
@@ -1090,7 +1198,7 @@ const App = {
                     if (status === 'completed') {
                         newItem.watchedEps = this.generateAllEps(seasons, episodes, newItem.seasonsData);
                     } else {
-                        newItem.watchedEps = existing.watchedEps || [];
+                        newItem.watchedEps = (existing && existing.watchedEps) ? existing.watchedEps : [];
                     }
                     this.state.series[idx] = { ...this.state.series[idx], ...newItem };
                 }
@@ -1102,6 +1210,29 @@ const App = {
             }
             
             this.tempSeasonsData = null;
+        } else if (type === 'book') {
+            const author = document.getElementById('bookAuthor').value.trim();
+            const pages = parseInt(document.getElementById('bookPages').value) || 0;
+            const status = document.getElementById('bookStatus').value;
+            const existing = isEdit ? this.state.books.find(b => b.id === this.editingId) : null;
+
+            const newItem = {
+                ...baseItem,
+                author, pages, status,
+                rating: existing ? (existing.rating || 0) : 0,
+                favorite: existing ? (existing.favorite || false) : false
+            };
+
+            if (isEdit) {
+                const idx = this.state.books.findIndex(b => b.id === this.editingId);
+                if (idx > -1) {
+                    this.state.books[idx] = { ...this.state.books[idx], ...newItem };
+                }
+            } else {
+                newItem.id = Date.now().toString();
+                newItem.createdAt = Date.now();
+                this.state.books.push(newItem);
+            }
         }
 
         this.save();
@@ -1198,84 +1329,157 @@ const App = {
     },
 
     renderAll() {
-        this.updateBadges();
-        this.updateGenreDropdowns();
-        this.renderDashboard();
-        this.renderMovies();
-        this.renderSeries();
-        this.renderBooks();
-        this.renderProfileStats();
+        try {
+            this.updateBadges();
+            this.updateGenreDropdowns();
+            this.renderDashboard();
+            this.renderMovies();
+            this.renderSeries();
+            this.renderBooks();
+            this.renderProfileStats();
+            this.updateUnreadBadges();
+        } catch (e) {
+            console.error('RenderAll error:', e);
+        }
     },
 
     renderProfileStats() {
+        const movies = this.state.movies || [];
+        const series = this.state.series || [];
+        const books  = this.state.books  || [];
+
         // Badges & Streak
-        document.getElementById('statStreak').innerHTML = `🔥 ${this.state.streak}`;
+        const streakEl = document.getElementById('statStreak');
+        if (streakEl) streakEl.innerHTML = `🔥 ${this.state.streak || 0}`;
         
-        if (document.getElementById('statFollowing')) {
-            document.getElementById('statFollowing').innerText = (this.state.following || []).length;
-        }
-        if (document.getElementById('statFollowers')) {
-            document.getElementById('statFollowers').innerText = (this.state.followers || []).length;
-        }
+        const followingEl = document.getElementById('statFollowing');
+        if (followingEl) followingEl.innerText = (this.state.following || []).length;
+
+        const followersEl = document.getElementById('statFollowers');
+        if (followersEl) followersEl.innerText = (this.state.followers || []).length;
 
         // Kütüphane İstatistikleri (Profile Tab)
-        if (document.getElementById('statMoviesWatched')) {
-            document.getElementById('statMoviesWatched').innerText = this.state.movies.filter(m => m.status === 'watched').length;
-        }
-        if (document.getElementById('statMoviesWatchlist')) {
-            document.getElementById('statMoviesWatchlist').innerText = this.state.movies.filter(m => m.status === 'watchlist').length;
-        }
-        if (document.getElementById('statSeriesTotal')) {
-            document.getElementById('statSeriesTotal').innerText = this.state.series.length;
-        }
-        if (document.getElementById('statEpsWatched')) {
+        const smw = document.getElementById('statMoviesWatched');
+        if (smw) smw.innerText = movies.filter(m => m.status === 'watched').length;
+
+        const smwl = document.getElementById('statMoviesWatchlist');
+        if (smwl) smwl.innerText = movies.filter(m => m.status === 'watchlist').length;
+
+        const sst = document.getElementById('statSeriesTotal');
+        if (sst) sst.innerText = series.length;
+
+        const sew = document.getElementById('statEpsWatched');
+        if (sew) {
             let totalEps = 0;
-            this.state.series.forEach(s => {
+            series.forEach(s => {
                 if (s.watchedEps) totalEps += s.watchedEps.length;
             });
-            document.getElementById('statEpsWatched').innerText = totalEps;
+            sew.innerText = totalEps;
+        }
+
+        // Kitap istatistikleri
+        if (document.getElementById('statBooksRead')) {
+            document.getElementById('statBooksRead').innerText = books.filter(b => b.status === 'read').length;
+        }
+        if (document.getElementById('statBooksReading')) {
+            document.getElementById('statBooksReading').innerText = books.filter(b => b.status === 'reading').length;
+        }
+        if (document.getElementById('statBooksReadlist')) {
+            document.getElementById('statBooksReadlist').innerText = books.filter(b => b.status === 'readlist').length;
+        }
+        if (document.getElementById('statBooksPages')) {
+            const totalPages = books
+                .filter(b => b.status === 'read')
+                .reduce((sum, b) => sum + (parseInt(b.pages) || 0), 0);
+            document.getElementById('statBooksPages').innerText = totalPages > 999
+                ? (totalPages / 1000).toFixed(1) + 'K'
+                : totalPages;
         }
         
         let earnedBadges = [];
-        if (this.state.movies.length > 0 || this.state.series.length > 0) {
+
+        // 1. General & Movies
+        if (movies.length > 0 || series.length > 0 || books.length > 0) {
             earnedBadges.push({ icon: '👶', name: 'Yeni Kan', desc: 'İlk içerik eklendi' });
         }
         
-        const watchedMovies = this.state.movies.filter(m => m.status === 'watched').length;
-        if (watchedMovies >= 10) {
-            earnedBadges.push({ icon: '🍿', name: 'Sinema Kurdu', desc: '10 film izlendi' });
-        } else if (watchedMovies >= 50) {
-            earnedBadges.push({ icon: '👑', name: 'Film Gurmesi', desc: '50 film izlendi' });
-        }
+        const watchedMovies = movies.filter(m => m.status === 'watched').length;
+        if (watchedMovies >= 5) earnedBadges.push({ icon: '🎬', name: 'Sinema Sever', desc: '5 film izlendi' });
+        if (watchedMovies >= 10) earnedBadges.push({ icon: '🍿', name: 'Sinema Kurdu', desc: '10 film izlendi' });
+        if (watchedMovies >= 25) earnedBadges.push({ icon: '🎭', name: 'Film Gurmesi', desc: '25 film izlendi' });
+        if (watchedMovies >= 50) earnedBadges.push({ icon: '👑', name: 'Sinema Kralı', desc: '50 film izlendi' });
+        if (watchedMovies >= 100) earnedBadges.push({ icon: '📽️', name: 'Yönetmen', desc: '100 film izlendi' });
 
+        // 2. Series & Episodes
         let totalEps = 0;
-        this.state.series.forEach(s => { if (s.watchedEps) totalEps += s.watchedEps.length; });
-        if (totalEps >= 20) {
-            earnedBadges.push({ icon: '📺', name: 'Dizi Kolik', desc: '20 bölüm izlendi' });
-        }
+        series.forEach(s => { if (s.watchedEps) totalEps += s.watchedEps.length; });
+        if (totalEps >= 10) earnedBadges.push({ icon: '📺', name: 'Bölüm Avcısı', desc: '10 bölüm izlendi' });
+        if (totalEps >= 50) earnedBadges.push({ icon: '🍿', name: 'Dizi Kolik', desc: '50 bölüm izlendi' });
+        if (totalEps >= 100) earnedBadges.push({ icon: '🏃', name: 'Maratoncu', desc: '100 bölüm izlendi' });
+        if (totalEps >= 250) earnedBadges.push({ icon: '🏆', name: 'Dizi Ustası', desc: '250 bölüm izlendi' });
+        if (totalEps >= 500) earnedBadges.push({ icon: '🎭', name: 'Bağımlı', desc: '500 bölüm izlendi' });
 
-        document.getElementById('statBadgeCount').innerText = earnedBadges.length;
+        // 3. Books
+        const readBooks = books.filter(b => b.status === 'read').length;
+        if (readBooks >= 3) earnedBadges.push({ icon: '📖', name: 'Kitap Dostu', desc: '3 kitap okundu' });
+        if (readBooks >= 10) earnedBadges.push({ icon: '📚', name: 'Kütüphaneci', desc: '10 kitap okundu' });
+        if (readBooks >= 25) earnedBadges.push({ icon: '📜', name: 'Bilge Okur', desc: '25 kitap okundu' });
+        if (readBooks >= 50) earnedBadges.push({ icon: '🖋️', name: 'Kelime Gezgini', desc: '50 kitap okundu' });
+        if (readBooks >= 100) earnedBadges.push({ icon: '🧙‍♂️', name: 'Kitap Büyücüsü', desc: '100 kitap okundu' });
+
+        // 4. Genre Specific (across all media)
+        const allItems = [...movies, ...series, ...books];
+        const genresCount = {};
+        allItems.forEach(item => {
+            if (item.genre) {
+                item.genre.split(',').forEach(g => {
+                    const cleanG = g.trim().toLowerCase();
+                    genresCount[cleanG] = (genresCount[cleanG] || 0) + 1;
+                });
+            }
+        });
+
+        if (genresCount['korku'] >= 5) earnedBadges.push({ icon: '🧟', name: 'Korku Gecesi', desc: '5 korku içeriği' });
+        if (genresCount['bilim kurgu'] >= 5 || genresCount['science fiction'] >= 5) earnedBadges.push({ icon: '🚀', name: 'Uzay Yolcusu', desc: '5 bilim kurgu' });
+        if (genresCount['romantik'] >= 5 || genresCount['romance'] >= 5) earnedBadges.push({ icon: '💖', name: 'Romantik Ruh', desc: '5 romantik içerik' });
+        if (genresCount['aksiyon'] >= 5 || genresCount['action'] >= 5) earnedBadges.push({ icon: '🧨', name: 'Aksiyon Bağımlısı', desc: '5 aksiyon içeriği' });
+
+        // 5. Activity
+        const ratedCount = [...movies, ...series, ...books].filter(x => x.rating > 0).length;
+        if (ratedCount >= 10) earnedBadges.push({ icon: '⭐', name: 'Eleştirmen', desc: '10 yapıma puan verildi' });
+        if (this.state.streak >= 7) earnedBadges.push({ icon: '🔥', name: 'İstikrarlı', desc: '7 günlük giriş serisi' });
+
+        const sbc = document.getElementById('statBadgeCount');
+        if (sbc) sbc.innerText = earnedBadges.length;
 
         const maxDisplayBadges = earnedBadges.slice(0, 3);
         const badgesList = document.getElementById('badgesList');
-        if (earnedBadges.length === 0) {
-            badgesList.innerHTML = `<div class="empty-widget" style="width:100%; text-align:center;">Henüz rozet kazanılmadı</div>`;
-        } else {
-            badgesList.innerHTML = maxDisplayBadges.map(b => `
-                <div style="background:var(--bg2); padding:12px; border-radius:12px; border:1px solid var(--border); min-width:110px; flex:1; text-align:center; display:flex; flex-direction:column; align-items:center; gap:4px;">
-                    <span style="font-size:24px;">${b.icon}</span>
-                    <span style="font-size:13px; font-weight:600;">${b.name}</span>
-                    <span style="font-size:10px; color:var(--text3);">${b.desc}</span>
-                </div>
-            `).join('');
+        if (badgesList) {
+            if (earnedBadges.length === 0) {
+                badgesList.innerHTML = `<div class="empty-widget" style="width:100%; text-align:center;">Henüz rozet kazanılmadı</div>`;
+            } else {
+                badgesList.innerHTML = maxDisplayBadges.map(b => `
+                    <div style="background:var(--bg2); padding:12px; border-radius:12px; border:1px solid var(--border); min-width:110px; flex:1; text-align:center; display:flex; flex-direction:column; align-items:center; gap:4px;">
+                        <span style="font-size:24px;">${b.icon}</span>
+                        <span style="font-size:13px; font-weight:600;">${b.name}</span>
+                        <span style="font-size:10px; color:var(--text3);">${b.desc}</span>
+                    </div>
+                `).join('');
+            }
         }
 
         // Chart.js (Genre Distribution)
         const ctx = document.getElementById('genreChart');
         if (!ctx) return;
         
+        const type = this._currentChartType || 'movie';
+        let items = [];
+        if (type === 'movie') items = this.state.movies;
+        else if (type === 'series') items = this.state.series;
+        else if (type === 'book') items = this.state.books || [];
+
         const genreCounts = {};
-        [...this.state.movies, ...this.state.series].forEach(item => {
+        items.forEach(item => {
             if (item.genre) {
                 item.genre.split(',').forEach(g => {
                     const cleanG = g.trim();
@@ -1328,6 +1532,16 @@ const App = {
             }
         });
     },
+    
+    switchChartTab(type, btn) {
+        this._currentChartType = type;
+        if (btn) {
+            const parent = btn.parentElement;
+            parent.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        }
+        this.renderProfileStats();
+    },
 
     updateGenreDropdowns() {
         const movieGenres = new Set();
@@ -1359,21 +1573,32 @@ const App = {
         const movieWatchlist = this.state.movies.filter(m => m.status === 'watchlist').length;
         const seriesWatching = this.state.series.filter(s => s.status === 'watching').length;
         
-        document.getElementById('movieBadge').innerText = movieWatchlist > 0 ? movieWatchlist : '';
-        document.getElementById('seriesBadge').innerText = seriesWatching > 0 ? seriesWatching : '';
+        const mb = document.getElementById('movieBadge');
+        if (mb) mb.innerText = movieWatchlist > 0 ? movieWatchlist : '';
+        
+        const sb = document.getElementById('seriesBadge');
+        if (sb) sb.innerText = seriesWatching > 0 ? seriesWatching : '';
     },
 
     renderDashboard() {
         // Stats
-        document.getElementById('statMoviesWatched').innerText = this.state.movies.filter(m => m.status === 'watched').length;
-        document.getElementById('statMoviesWatchlist').innerText = this.state.movies.filter(m => m.status === 'watchlist').length;
-        document.getElementById('statSeriesTotal').innerText = this.state.series.length;
+        const smw = document.getElementById('statMoviesWatched');
+        if (smw) smw.innerText = this.state.movies.filter(m => m.status === 'watched').length;
+
+        const smwl = document.getElementById('statMoviesWatchlist');
+        if (smwl) smwl.innerText = this.state.movies.filter(m => m.status === 'watchlist').length;
+
+        const sst = document.getElementById('statSeriesTotal');
+        if (sst) sst.innerText = this.state.series.length;
         
-        let totalEps = 0;
-        this.state.series.forEach(s => {
-            if (s.watchedEps) totalEps += s.watchedEps.length;
-        });
-        document.getElementById('statEpsWatched').innerText = totalEps;
+        const sew = document.getElementById('statEpsWatched');
+        if (sew) {
+            let totalEps = 0;
+            this.state.series.forEach(s => {
+                if (s.watchedEps) totalEps += s.watchedEps.length;
+            });
+            sew.innerText = totalEps;
+        }
 
         // Continue
         const continueList = document.getElementById('continueList');
@@ -1405,16 +1630,17 @@ const App = {
 
         // Recent
         const recentList = document.getElementById('recentList');
-        const allItems = [...this.state.movies, ...this.state.series].sort((a, b) => b.createdAt - a.createdAt).slice(0, 5);
+        const booksForRecent = (this.state.books || []).map(b => ({...b, type: 'book'}));
+        const allItems = [...this.state.movies, ...this.state.series, ...booksForRecent].sort((a, b) => b.createdAt - a.createdAt).slice(0, 5);
         if (allItems.length === 0) {
             recentList.innerHTML = '<div class="empty-widget">Henüz içerik yok</div>';
         } else {
             recentList.innerHTML = allItems.map(item => `
-                <div class="recent-item" onclick="App.${item.type === 'movie' ? 'openMovieDetail' : 'openSeriesDetail'}('${item.id}')">
-                    <div class="recent-type">${item.type === 'movie' ? '🎬' : '📺'}</div>
+                <div class="recent-item" onclick="App.${item.type === 'movie' ? 'openMovieDetail' : item.type === 'series' ? 'openSeriesDetail' : 'openBookDetail'}('${item.id}')">
+                    <div class="recent-type">${item.type === 'movie' ? '🎬' : item.type === 'series' ? '📺' : '📚'}</div>
                     <div class="recent-info">
                         <div class="recent-title">${item.title}</div>
-                        <div class="recent-meta">${item.type === 'movie' ? 'Film' : 'Dizi'} • ${new Date(item.createdAt).toLocaleDateString()}</div>
+                        <div class="recent-meta">${item.type === 'movie' ? 'Film' : item.type === 'series' ? 'Dizi' : 'Kitap'} • ${new Date(item.createdAt).toLocaleDateString()}</div>
                     </div>
                 </div>
             `).join('');
@@ -1439,19 +1665,29 @@ const App = {
 
         // Discover Carousel
         const discoverWidget = document.getElementById('discoverWidget');
-        discoverWidget.classList.remove('hidden');
-        if (document.getElementById('discoverCarousel').innerHTML.includes('Yükleniyor')) {
-            this.loadDiscoverCarousel();
+        if (discoverWidget) {
+            discoverWidget.classList.remove('hidden');
+            const discCarousel = document.getElementById('discoverCarousel');
+            if (discCarousel && discCarousel.innerHTML.includes('Yükleniyor')) {
+                this.loadDiscoverCarousel();
+            }
         }
 
         // Goal
-        document.getElementById('goalInput').value = this.state.goal;
-        document.getElementById('goalTarget').innerText = this.state.goal;
-        document.getElementById('goalCurrent').innerText = this.state.goalCurrent;
+        const gi = document.getElementById('goalInput');
+        if (gi) gi.value = this.state.goal;
+        
+        const gt = document.getElementById('goalTarget');
+        if (gt) gt.innerText = this.state.goal;
+        
+        const gc = document.getElementById('goalCurrent');
+        if (gc) gc.innerText = this.state.goalCurrent;
         
         const goalPerc = Math.min(100, Math.round((this.state.goalCurrent / this.state.goal) * 100));
         const offset = 314 - (314 * goalPerc) / 100;
-        document.getElementById('goalRing').style.strokeDashoffset = offset;
+        
+        const gr = document.getElementById('goalRing');
+        if (gr) gr.style.strokeDashoffset = offset;
 
         const svgElement = document.querySelector('.goal-svg');
         const rankEl = document.getElementById('goalRank');
@@ -1493,15 +1729,24 @@ const App = {
 
     renderMovies() {
         const grid = document.getElementById('movieGrid');
-        const search = document.getElementById('searchInput').value.trim().toLocaleLowerCase('tr');
+        if (!grid) return;
+
+        const si = document.getElementById('searchInput');
+        const search = si ? si.value.trim().toLocaleLowerCase('tr') : '';
         const filterBtn = document.querySelector('#tab-movies .filter-btn.active');
         const filter = filterBtn ? filterBtn.dataset.filter : 'all';
-        const sort = document.getElementById('movieSort').value;
-        const genreFilter = document.getElementById('movieGenreFilter') ? document.getElementById('movieGenreFilter').value : 'all';
+        const ms = document.getElementById('movieSort');
+        const sort = ms ? ms.value : 'added';
+        const mgf = document.getElementById('movieGenreFilter');
+        const genreFilter = mgf ? mgf.value : 'all';
 
         let filtered = this.state.movies.filter(m => {
             if (search && !m.title.toLocaleLowerCase('tr').includes(search)) return false;
-            if (filter !== 'all' && m.status !== filter) return false;
+            if (filter === 'favorites') {
+                if (!m.favorite) return false;
+            } else if (filter !== 'all' && m.status !== filter) {
+                return false;
+            }
             if (genreFilter !== 'all' && (!m.genre || !m.genre.split(',').map(g=>g.trim()).includes(genreFilter))) return false;
             return true;
         });
@@ -1546,26 +1791,33 @@ const App = {
                 let platformBadge = this.getPlatformBadge(m.platform);
 
                 return `
-                <div class="movie-card" onclick="App.openMovieDetail('${m.id}')">
-                    <div class="movie-poster">
-                        ${m.poster ? `<img src="${m.poster}" loading="lazy" />` : `<div class="movie-poster-placeholder">🎬</div>`}
-                        ${globalBadge}
-                        ${mustWatchBadge}
-                        ${badge}
-                    </div>
-                    <div class="movie-info">
-                        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom: 2px;">
-                            <div class="movie-title" style="margin-bottom:0;">${m.title} ${platformBadge}</div>
-                            <div onclick="event.stopPropagation(); App.toggleFavoriteFromGrid('${m.id}', 'movie')" style="font-size: 16px; cursor: pointer; transition: transform 0.2s; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));" onmouseover="this.style.transform='scale(1.2)'" onmouseout="this.style.transform='scale(1)'">
-                                ${m.favorite ? '❤️' : '🤍'}
+                <div class="swipe-item" data-id="${m.id}" data-type="movie">
+                    <div class="swipe-bg swipe-action-left"><span class="swipe-icon">✅</span></div>
+                    <div class="swipe-bg swipe-action-right"><span class="swipe-icon">❤️</span></div>
+                    <div class="swipe-item-content">
+                        <div class="movie-card" onclick="App.openMovieDetail('${m.id}')">
+                            <div class="movie-poster">
+                                ${m.poster ? `<img src="${m.poster}" loading="lazy" />` : `<div class="movie-poster-placeholder">🎬</div>`}
+                                ${globalBadge}
+                                ${mustWatchBadge}
+                                ${badge}
+                            </div>
+                            <div class="movie-info">
+                                <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom: 2px;">
+                                    <div class="movie-title" style="margin-bottom:0;">${m.title} ${platformBadge}</div>
+                                    <div onclick="event.stopPropagation(); App.toggleFavoriteFromGrid('${m.id}', 'movie')" style="font-size: 16px; cursor: pointer; transition: transform 0.2s; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));" onmouseover="this.style.transform='scale(1.2)'" onmouseout="this.style.transform='scale(1)'">
+                                        ${m.favorite ? '❤️' : '🤍'}
+                                    </div>
+                                </div>
+                                <div class="movie-year">${m.year || ''} ${m.genre ? `• ${m.genre}` : ''}</div>
+                                ${starHtml}
                             </div>
                         </div>
-                        <div class="movie-year">${m.year || ''} ${m.genre ? `• ${m.genre}` : ''}</div>
-                        ${starHtml}
                     </div>
                 </div>
                 `;
             }).join('');
+            this.bindSwipeEvents();
         }
         
         // Init SortableJS if no filters/sort applied
@@ -1595,15 +1847,24 @@ const App = {
 
     renderSeries() {
         const list = document.getElementById('seriesList');
-        const search = document.getElementById('searchInput').value.trim().toLocaleLowerCase('tr');
+        if (!list) return;
+
+        const si = document.getElementById('searchInput');
+        const search = si ? si.value.trim().toLocaleLowerCase('tr') : '';
         const filterBtn = document.querySelector('#tab-series .filter-btn.active');
         const filter = filterBtn ? filterBtn.dataset.filter : 'all';
-        const sort = document.getElementById('seriesSort').value;
-        const genreFilter = document.getElementById('seriesGenreFilter') ? document.getElementById('seriesGenreFilter').value : 'all';
+        const ss = document.getElementById('seriesSort');
+        const sort = ss ? ss.value : 'added';
+        const sgf = document.getElementById('seriesGenreFilter');
+        const genreFilter = sgf ? sgf.value : 'all';
 
         let filtered = this.state.series.filter(s => {
             if (search && !s.title.toLocaleLowerCase('tr').includes(search)) return false;
-            if (filter !== 'all' && s.status !== filter) return false;
+            if (filter === 'favorites') {
+                if (!s.favorite) return false;
+            } else if (filter !== 'all' && s.status !== filter) {
+                return false;
+            }
             if (genreFilter !== 'all' && (!s.genre || !s.genre.split(',').map(g=>g.trim()).includes(genreFilter))) return false;
             return true;
         });
@@ -1646,42 +1907,40 @@ const App = {
                 else if (s.status === 'paused') statusTag = '<span class="series-status-tag status-paused">Durduruldu</span>';
                 else if (s.status === 'watchlist') statusTag = '<span class="series-status-tag status-watchlist">İzlenecek</span>';
 
-                const starColor = this.getRatingColor(s.rating);
-                const starHtml = s.rating ? `<div class="series-rating" style="color:${starColor}">${'★'.repeat(s.rating)}<span style="color:var(--bg3)">${'★'.repeat(10-s.rating)}</span></div>` : '';
-                let globalBadge = s.globalRating ? `<div class="global-rating-badge">⭐ ${s.globalRating}</div>` : '';
-                let mustWatchBadge = s.rating >= 9 ? `<div class="must-watch-badge">✨ Başyapıt</div>` : '';
-                let platformBadge = this.getPlatformBadge(s.platform);
-
                 return `
-                <div class="series-card" onclick="App.openSeriesDetail('${s.id}')">
-                    <div class="series-thumb">
-                        ${s.poster ? `<img src="${s.poster}" loading="lazy"/>` : '<div class="series-poster-placeholder">📺</div>'}
-                        ${globalBadge}
-                        ${mustWatchBadge}
-                        ${statusTag}
-                    </div>
-                    <div class="series-meta">
-                        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom: 2px;">
-                            <div class="series-title" style="margin-bottom:0;">${s.title} ${platformBadge}</div>
-                            <div onclick="event.stopPropagation(); App.toggleFavoriteFromGrid('${s.id}', 'series')" style="font-size: 16px; cursor: pointer; transition: transform 0.2s; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));" onmouseover="this.style.transform='scale(1.2)'" onmouseout="this.style.transform='scale(1)'">
-                                ${s.favorite ? '❤️' : '🤍'}
+                <div class="swipe-item" data-id="${s.id}" data-type="series">
+                    <div class="swipe-bg swipe-action-left"><span class="swipe-icon">✅</span></div>
+                    <div class="swipe-bg swipe-action-right"><span class="swipe-icon">❤️</span></div>
+                    <div class="swipe-item-content">
+                        <div class="series-card" onclick="App.openSeriesDetail('${s.id}')">
+                            <div class="series-thumb">
+                                ${s.poster ? `<img src="${s.poster}" loading="lazy" />` : `<div class="series-poster-placeholder">📺</div>`}
+                                ${statusTag}
                             </div>
-                        </div>
-                        <div class="series-year">${s.year || ''} ${s.genre ? `• ${s.genre}` : ''}</div>
-                        ${starHtml}
-                        <div class="series-prog-wrap">
-                            <div class="series-prog-label">
-                                <span>İlerleme</span>
-                                <span>${watched} / ${total}</span>
-                            </div>
-                            <div class="series-prog">
-                                <div class="series-prog-bar" style="width: ${perc}%"></div>
+                            <div class="series-meta">
+                                <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom: 2px;">
+                                    <div class="series-title" style="margin-bottom:0;">${s.title}</div>
+                                    <div onclick="event.stopPropagation(); App.toggleFavoriteFromGrid('${s.id}', 'series')" style="font-size: 16px; cursor: pointer; transition: transform 0.2s;">
+                                        ${s.favorite ? '❤️' : '🤍'}
+                                    </div>
+                                </div>
+                                <div class="series-year">${s.year || ''} ${s.genre ? `• ${s.genre}` : ''}</div>
+                                <div class="series-prog-wrap">
+                                    <div class="series-prog-label">
+                                        <span>İlerleme</span>
+                                        <span>${watched} / ${total}</span>
+                                    </div>
+                                    <div class="series-prog">
+                                        <div class="series-prog-bar" style="width: ${perc}%"></div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
                 `;
             }).join('');
+            this.bindSwipeEvents();
         }
         
         // Init SortableJS if no filters/sort applied
@@ -1718,6 +1977,7 @@ const App = {
         for (let i=1; i<=10; i++) {
             starsInteractive += `<span style="font-size: 28px; cursor: pointer; transition: 0.2s; color: ${i <= (m.rating || 0) ? this.getRatingColor(m.rating) : 'var(--bg3)'}" onclick="event.stopPropagation(); App.quickRate('${m.id}', 'movie', ${i})">★</span>`;
         }
+        starsInteractive += `<span onclick="event.stopPropagation(); App.quickRate('${m.id}', 'movie', 0)" style="font-size: 16px; margin-left: 10px; cursor: pointer; color: var(--text3); opacity: 0.6; padding: 5px;" title="Puanı Sıfırla">✕</span>`;
         starsInteractive += `</div>`;
 
         const statusOptions = `
@@ -1801,6 +2061,7 @@ const App = {
         for (let i=1; i<=10; i++) {
             starsInteractive += `<span style="font-size: 28px; cursor: pointer; transition: 0.2s; color: ${i <= (s.rating || 0) ? this.getRatingColor(s.rating) : 'var(--bg3)'}" onclick="event.stopPropagation(); App.quickRate('${s.id}', 'series', ${i})">★</span>`;
         }
+        starsInteractive += `<span onclick="event.stopPropagation(); App.quickRate('${s.id}', 'series', 0)" style="font-size: 16px; margin-left: 10px; cursor: pointer; color: var(--text3); opacity: 0.6; padding: 5px;" title="Puanı Sıfırla">✕</span>`;
         starsInteractive += `</div>`;
 
         const statusOptions = `
@@ -2030,31 +2291,66 @@ const App = {
     },
 
     renderAllBadgesModal() {
-        const allPossibleBadges = [
-            { id: 'b1', icon: '👶', name: 'Yeni Kan', desc: 'İlk içerik eklendi' },
-            { id: 'b2', icon: '🍿', name: 'Sinema Kurdu', desc: '10 film izlendi' },
-            { id: 'b3', icon: '👑', name: 'Film Gurmesi', desc: '50 film izlendi' },
-            { id: 'b4', icon: '📺', name: 'Dizi Kolik', desc: '20 bölüm izlendi' },
-            { id: 'b5', icon: '⭐', name: 'Eleştirmen', desc: '10 yapıma puan verildi' },
-            { id: 'b6', icon: '🔥', name: 'İstikrarlı', desc: '7 günlük giriş serisi' }
-        ];
+        // This should match the logic in renderProfileStats
+        let earnedBadges = [];
+        const movies = this.state.movies || [];
+        const series = this.state.series || [];
+        const books  = this.state.books  || [];
 
-        const watchedMovies = this.state.movies.filter(m => m.status === 'watched').length;
+        // 1. General & Movies
+        if (movies.length > 0 || series.length > 0 || books.length > 0) earnedBadges.push({ icon: '👶', name: 'Yeni Kan', desc: 'İlk içerik eklendi' });
+        
+        const watchedMovies = movies.filter(m => m.status === 'watched').length;
+        if (watchedMovies >= 5) earnedBadges.push({ icon: '🎬', name: 'Sinema Sever', desc: '5 film izlendi' });
+        if (watchedMovies >= 10) earnedBadges.push({ icon: '🍿', name: 'Sinema Kurdu', desc: '10 film izlendi' });
+        if (watchedMovies >= 25) earnedBadges.push({ icon: '🎭', name: 'Film Gurmesi', desc: '25 film izlendi' });
+        if (watchedMovies >= 50) earnedBadges.push({ icon: '👑', name: 'Sinema Kralı', desc: '50 film izlendi' });
+        if (watchedMovies >= 100) earnedBadges.push({ icon: '📽️', name: 'Yönetmen', desc: '100 film izlendi' });
+
+        // 2. Series & Episodes
         let totalEps = 0;
-        this.state.series.forEach(s => { if (s.watchedEps) totalEps += s.watchedEps.length; });
-        const ratedCount = [...this.state.movies, ...this.state.series].filter(x => x.rating > 0).length;
+        series.forEach(s => { if (s.watchedEps) totalEps += s.watchedEps.length; });
+        if (totalEps >= 10) earnedBadges.push({ icon: '📺', name: 'Bölüm Avcısı', desc: '10 bölüm izlendi' });
+        if (totalEps >= 50) earnedBadges.push({ icon: '🍿', name: 'Dizi Kolik', desc: '50 bölüm izlendi' });
+        if (totalEps >= 100) earnedBadges.push({ icon: '🏃', name: 'Maratoncu', desc: '100 bölüm izlendi' });
+        if (totalEps >= 250) earnedBadges.push({ icon: '🏆', name: 'Dizi Ustası', desc: '250 bölüm izlendi' });
+        if (totalEps >= 500) earnedBadges.push({ icon: '🎭', name: 'Bağımlı', desc: '500 bölüm izlendi' });
 
-        const earnedIds = new Set();
-        if (this.state.movies.length > 0 || this.state.series.length > 0) earnedIds.add('b1');
-        if (watchedMovies >= 10) earnedIds.add('b2');
-        if (watchedMovies >= 50) earnedIds.add('b3');
-        if (totalEps >= 20) earnedIds.add('b4');
-        if (ratedCount >= 10) earnedIds.add('b5');
-        if (this.state.streak >= 7) earnedIds.add('b6');
+        // 3. Books
+        const readBooks = books.filter(b => b.status === 'read').length;
+        if (readBooks >= 3) earnedBadges.push({ icon: '📖', name: 'Kitap Dostu', desc: '3 kitap okundu' });
+        if (readBooks >= 10) earnedBadges.push({ icon: '📚', name: 'Kütüphaneci', desc: '10 kitap okundu' });
+        if (readBooks >= 25) earnedBadges.push({ icon: '📜', name: 'Bilge Okur', desc: '25 kitap okundu' });
+        if (readBooks >= 50) earnedBadges.push({ icon: '🖋️', name: 'Kelime Gezgini', desc: '50 kitap okundu' });
+        if (readBooks >= 100) earnedBadges.push({ icon: '🧙‍♂️', name: 'Kitap Büyücüsü', desc: '100 kitap okundu' });
+
+        // 4. Special
+        const ratedCount = [...movies, ...series, ...books].filter(x => x.rating > 0).length;
+        if (ratedCount >= 10) earnedBadges.push({ icon: '⭐', name: 'Eleştirmen', desc: '10 yapıma puan verildi' });
+        if (this.state.streak >= 7) earnedBadges.push({ icon: '🔥', name: 'İstikrarlı', desc: '7 günlük giriş serisi' });
+
+        const earnedNames = new Set(earnedBadges.map(b => b.name));
+
+        const allPossibleBadges = [
+            { icon: '👶', name: 'Yeni Kan', desc: 'İlk içerik eklendi' },
+            { icon: '🎬', name: 'Sinema Sever', desc: '5 film izlendi' },
+            { icon: '🍿', name: 'Sinema Kurdu', desc: '10 film izlendi' },
+            { icon: '🎭', name: 'Film Gurmesi', desc: '25 film izlendi' },
+            { icon: '👑', name: 'Sinema Kralı', desc: '50 film izlendi' },
+            { icon: '📽️', name: 'Yönetmen', desc: '100 film izlendi' },
+            { icon: '📺', name: 'Bölüm Avcısı', desc: '10 bölüm izlendi' },
+            { icon: '🏃', name: 'Maratoncu', desc: '100 bölüm izlendi' },
+            { icon: '📖', name: 'Kitap Dostu', desc: '3 kitap okundu' },
+            { icon: '📚', name: 'Kütüphaneci', desc: '10 kitap okundu' },
+            { icon: '📜', name: 'Bilge Okur', desc: '25 kitap okundu' },
+            { icon: '🧙‍♂️', name: 'Kitap Büyücüsü', desc: '100 kitap okundu' },
+            { icon: '⭐', name: 'Eleştirmen', desc: '10 yapıma puan verildi' },
+            { icon: '🔥', name: 'İstikrarlı', desc: '7 günlük giriş serisi' }
+        ];
 
         const grid = document.getElementById('allBadgesGrid');
         grid.innerHTML = allPossibleBadges.map(b => {
-            const isEarned = earnedIds.has(b.id);
+            const isEarned = earnedNames.has(b.name);
             const opacity = isEarned ? '1' : '0.4';
             const filter = isEarned ? 'none' : 'grayscale(100%)';
             return `
@@ -3175,7 +3471,7 @@ const App = {
         }
     },
 
-    // Oynatma hızını değiştir (Firestore'a yaz, tüm üyeler görsün)
+    // Oynatıcı hızını değiştir (Firestore'a yaz, tüm üyeler görsün)
     async _wpSetSpeed(speed) {
         if (!this.currentWatchPartyId || !db) return;
         const data = this._wpCurrentPartyData;
@@ -3883,78 +4179,128 @@ Object.assign(App, {
     _editingBookId: null,
 
     openBookModal(editMode = false) {
-        this._editingBookId = editMode ? this._currentBookDetailId : null;
-        document.getElementById('bookModalTitle').innerText = editMode ? '✏️ Kitap Düzenle' : '📚 Kitap Ekle';
-        document.getElementById('bookSearchResults').classList.add('hidden');
-
-        if (editMode && this._editingBookId) {
-            const book = this.state.books.find(b => b.id === this._editingBookId);
-            if (book) {
-                document.getElementById('bookFormTitle').value = book.title || '';
-                document.getElementById('bookFormAuthor').value = book.author || '';
-                document.getElementById('bookFormYear').value = book.year || '';
-                document.getElementById('bookFormPages').value = book.pages || '';
-                document.getElementById('bookFormGenre').value = book.genre || '';
-                document.getElementById('bookFormStatus').value = book.status || 'readlist';
-                document.getElementById('bookFormCover').value = book.cover || '';
-                document.getElementById('bookFormNote').value = book.note || '';
-            }
+        if (editMode) {
+            this.editingId = this._currentBookDetailId;
+            this.openEditModal('book');
         } else {
-            document.getElementById('bookFormTitle').value = '';
-            document.getElementById('bookFormAuthor').value = '';
-            document.getElementById('bookFormYear').value = '';
-            document.getElementById('bookFormPages').value = '';
-            document.getElementById('bookFormGenre').value = '';
-            document.getElementById('bookFormStatus').value = 'readlist';
-            document.getElementById('bookFormCover').value = '';
-            document.getElementById('bookFormNote').value = '';
+            this.openAddModal('book');
         }
-
-        // Close detail modal if open
-        document.getElementById('bookDetailModal').classList.remove('open');
-        document.getElementById('bookModal').classList.add('open');
     },
 
     async searchOpenLibrary(query) {
         const resultsContainer = document.getElementById('bookSearchResults');
+        if (!resultsContainer) return;
+        
         resultsContainer.classList.remove('hidden');
         resultsContainer.innerHTML = '<div class="tmdb-loading">Aranıyor...</div>';
 
-        try {
-            const res = await fetch(`https://openlibrary.org/search.json?q=${encodeURIComponent(query)}&limit=10&fields=key,title,author_name,first_publish_year,cover_i,number_of_pages_median,subject`);
-            const data = await res.json();
+        const normalize = (str) => {
+            return str.replace(/ğ/g, 'g').replace(/ü/g, 'u').replace(/ş/g, 's').replace(/ı/g, 'i').replace(/ö/g, 'o').replace(/ç/g, 'c')
+                      .replace(/Ğ/g, 'G').replace(/Ü/g, 'U').replace(/Ş/g, 'S').replace(/İ/g, 'I').replace(/Ö/g, 'O').replace(/Ç/g, 'C');
+        };
 
-            if (data.docs && data.docs.length > 0) {
-                resultsContainer.innerHTML = data.docs.map(item => {
-                    const title = item.title || 'Bilinmiyor';
-                    const author = item.author_name ? item.author_name[0] : 'Bilinmiyor';
-                    const year = item.first_publish_year || '';
-                    const coverId = item.cover_i;
-                    const cover = coverId ? `https://covers.openlibrary.org/b/id/${coverId}-S.jpg` : '';
-                    const pages = item.number_of_pages_median || '';
+        try {
+            // 1. Try Google Books (Broader search)
+            let url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=20`;
+            let res = await fetch(url);
+            let data = await res.json();
+            let items = data.items || [];
+
+            // 2. If no results, try normalized query
+            if (items.length === 0) {
+                const normQuery = normalize(query);
+                if (normQuery !== query) {
+                    res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(normQuery)}&maxResults=20`);
+                    data = await res.json();
+                    items = data.items || [];
+                }
+            }
+
+            // 3. If still no results, try Open Library
+            if (items.length === 0) {
+                try {
+                    const olRes = await fetch(`https://openlibrary.org/search.json?q=${encodeURIComponent(query)}&limit=10`);
+                    const olData = await olRes.json();
+                    if (olData.docs && olData.docs.length > 0) {
+                        items = olData.docs.map(doc => ({
+                            volumeInfo: {
+                                title: doc.title,
+                                authors: doc.author_name,
+                                publishedDate: doc.first_publish_year?.toString(),
+                                pageCount: doc.number_of_pages_median,
+                                categories: doc.subject,
+                                description: doc.first_sentence?.join(' '),
+                                imageLinks: doc.cover_i ? {
+                                    thumbnail: `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg`,
+                                    smallThumbnail: `https://covers.openlibrary.org/b/id/${doc.cover_i}-S.jpg`
+                                } : null
+                            }
+                        }));
+                    }
+                } catch (e) { console.warn('OpenLibrary fallback failed', e); }
+            }
+
+            if (items.length > 0) {
+                this._bookSearchResults = items.map(item => {
+                    const info = item.volumeInfo || {};
+                    let desc = info.description || '';
+                    if (typeof desc === 'object') desc = desc.value || ''; // Handle Google Books description object
+                    
+                    return {
+                        title: info.title || 'Bilinmiyor',
+                        author: info.authors ? (Array.isArray(info.authors) ? info.authors.join(', ') : info.authors) : 'Bilinmiyor',
+                        year: info.publishedDate ? info.publishedDate.split('-')[0] : '',
+                        pages: info.pageCount || '',
+                        genre: info.categories ? (Array.isArray(info.categories) ? info.categories.slice(0, 2).join(', ') : info.categories) : '',
+                        note: desc,
+                        cover: (info.imageLinks?.thumbnail || info.imageLinks?.smallThumbnail || '').replace('http://', 'https://').replace('zoom=1', 'zoom=2'),
+                        coverThumb: (info.imageLinks?.thumbnail || info.imageLinks?.smallThumbnail || '').replace('http://', 'https://')
+                    };
+                });
+
+                resultsContainer.innerHTML = this._bookSearchResults.map((book, index) => {
+                    const lowerTitle = book.title.toLowerCase();
+                    const exists = this.state.books.some(b => b.title.toLowerCase() === lowerTitle);
+                    const existingBadge = exists ? `<div class="tmdb-existing-overlay" title="Kütüphanende Ekli">✅</div>` : '';
 
                     return `
-                        <div class="tmdb-item" onclick="App.selectOpenLibraryItem(${JSON.stringify({
-                            title, author, year, pages,
-                            cover: coverId ? `https://covers.openlibrary.org/b/id/${coverId}-M.jpg` : '',
-                            genre: item.subject ? item.subject.slice(0,3).join(', ') : ''
-                        }).replace(/"/g, '&quot;')})">
+                        <div class="tmdb-item" onclick="App.selectOpenLibraryIndex(${index})">
                             <div class="tmdb-poster">
-                                ${cover ? `<img src="${cover}" style="width:100%;height:100%;object-fit:cover;border-radius:6px;"/>` : '📚'}
+                                ${book.coverThumb
+                                    ? `<img src="${book.coverThumb}" style="width:100%;height:100%;object-fit:cover;border-radius:6px;" onerror="this.outerHTML='📚'"/>`
+                                    : '📚'}
+                                ${existingBadge}
                             </div>
                             <div class="tmdb-info">
-                                <div class="tmdb-title">${title}</div>
-                                <div class="tmdb-year">${author}${year ? ' · ' + year : ''}${pages ? ' · ' + pages + ' sf.' : ''}</div>
+                                <div class="tmdb-title">${book.title}</div>
+                                <div class="tmdb-year">${book.author}${book.year ? ' · ' + book.year : ''}</div>
                             </div>
                         </div>
                     `;
                 }).join('');
             } else {
-                resultsContainer.innerHTML = '<div class="tmdb-loading">Sonuç bulunamadı.</div>';
+                resultsContainer.innerHTML = '<div class="tmdb-loading">Sonuç bulunamadı. Lütfen tam adı yazmayı deneyin.</div>';
             }
         } catch (err) {
+            console.error('Book search error:', err);
             resultsContainer.innerHTML = '<div class="tmdb-loading">Arama başarısız.</div>';
         }
+    },
+
+    selectOpenLibraryIndex(index) {
+        if (!this._bookSearchResults || !this._bookSearchResults[index]) return;
+        const book = this._bookSearchResults[index];
+        
+        document.getElementById('formTitle').value = book.title;
+        document.getElementById('bookAuthor').value = book.author;
+        document.getElementById('formYear').value = book.year;
+        document.getElementById('bookPages').value = book.pages;
+        document.getElementById('formGenre').value = book.genre;
+        document.getElementById('formPoster').value = book.cover;
+        if (book.note) document.getElementById('formNote').value = book.note.slice(0, 500);
+        
+        document.getElementById('bookSearchResults').classList.add('hidden');
+        this.showToast('✅ Kitap bilgileri dolduruldu!');
     },
 
     selectOpenLibraryItem(itemData) {
@@ -4020,13 +4366,14 @@ Object.assign(App, {
         for (let i = 1; i <= 10; i++) {
             starsHtml += `<span style="font-size:28px; cursor:pointer; transition:0.2s; color:${i <= (book.rating || 0) ? this.getRatingColor(book.rating) : 'var(--bg3)'}" onclick="App.quickRateBook('${book.id}', ${i})">★</span>`;
         }
+        starsHtml += `<span onclick="event.stopPropagation(); App.quickRateBook('${book.id}', 0)" style="font-size: 16px; margin-left: 10px; cursor: pointer; color: var(--text3); opacity: 0.6; padding: 5px;" title="Puanı Sıfırla">✕</span>`;
         starsHtml += `</div>`;
 
         const statusLabels = { read: 'Okundu', reading: 'Okunuyor', readlist: 'Okunacak' };
         const statusColors = { read: 'var(--green)', reading: 'var(--primary)', readlist: 'var(--amber)' };
 
         const body = `
-            ${book.cover ? `<div class="detail-poster"><img src="${book.cover}" /></div>` : ''}
+            ${(book.poster || book.cover) ? `<div class="detail-poster"><img src="${book.poster || book.cover}" /></div>` : ''}
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                 <h3 class="detail-title" style="margin:0;">${book.title}</h3>
                 <select class="detail-status-select" onchange="App.quickBookStatus('${book.id}', this.value)">
@@ -4043,6 +4390,18 @@ Object.assign(App, {
             </div>
             ${starsHtml}
             ${book.note ? `<div class="detail-note">${book.note}</div>` : ''}
+
+            <!-- Kitap Okuma Asistanı -->
+            <div class="widget stats-widget" style="margin-top:20px; background:rgba(168,85,247,0.1); border:1px solid var(--primary);">
+                <h4 style="margin-bottom:10px; font-size:14px; display:flex; align-items:center; gap:8px;">📚 Okuma Asistanı</h4>
+                <div style="font-size:13px; color:var(--text2); line-height:1.6;">
+                    ${book.pages ? `
+                        Günde 
+                        <input type="number" value="${this.state.dailyPageGoal || 20}" onchange="App.updateDailyGoal(this.value)" style="width:40px; background:var(--bg3); border:1px solid var(--border); color:var(--text); text-align:center; border-radius:4px; font-size:12px;"> 
+                        sayfa okursan, bu kitabı <b>${Math.ceil(book.pages / (this.state.dailyPageGoal || 20))} günde</b> bitirebilirsin.
+                    ` : 'Sayfa sayısı belirtilmemiş.'}
+                </div>
+            </div>
         `;
 
         document.getElementById('bookDetailBody').innerHTML = body;
@@ -4094,17 +4453,208 @@ Object.assign(App, {
         }
     },
 
+    updateDailyGoal(val) {
+        this.state.dailyPageGoal = parseInt(val) || 20;
+        this.save();
+        if (this._currentBookDetailId) this.openBookDetail(this._currentBookDetailId);
+    },
+
+    bindSwipeEvents() {
+        const items = document.querySelectorAll('.swipe-item');
+        items.forEach(item => {
+            let startX = 0;
+            let currentX = 0;
+            const content = item.querySelector('.swipe-item-content');
+            const id = item.dataset.id;
+            const type = item.dataset.type;
+
+            item.addEventListener('touchstart', (e) => {
+                startX = e.touches[0].clientX;
+            }, {passive: true});
+
+            item.addEventListener('touchmove', (e) => {
+                currentX = e.touches[0].clientX - startX;
+                if (Math.abs(currentX) > 20) {
+                    content.style.transform = `translateX(${currentX}px)`;
+                    const left = item.querySelector('.swipe-action-left');
+                    const right = item.querySelector('.swipe-action-right');
+                    if (left && right) {
+                        left.style.opacity = currentX > 50 ? '1' : '0';
+                        right.style.opacity = currentX < -50 ? '1' : '0';
+                    }
+                }
+            }, {passive: true});
+
+            item.addEventListener('touchend', () => {
+                if (currentX > 100) {
+                    this.handleSwipeAction(id, type, 'left');
+                } else if (currentX < -100) {
+                    this.handleSwipeAction(id, type, 'right');
+                }
+                content.style.transform = 'translateX(0)';
+                item.querySelectorAll('.swipe-bg').forEach(bg => bg.style.opacity = '0');
+                currentX = 0;
+            });
+        });
+    },
+
+    handleSwipeAction(id, type, direction) {
+        if (direction === 'left') {
+            if (type === 'movie') this.quickStatus(id, 'movie', 'watched');
+            else if (type === 'series') this.quickStatus(id, 'series', 'completed');
+            else if (type === 'book') this.quickBookStatus(id, 'read');
+            this.showToast('İzlendi/Okundu olarak işaretlendi! ✅');
+        } else {
+            if (type === 'movie') this.toggleFavoriteFromGrid(id, 'movie');
+            else if (type === 'series') this.toggleFavoriteFromGrid(id, 'series');
+            else if (type === 'book') this.toggleBookFavGrid(id);
+        }
+    },
+
+    renderCollections() {
+        const list = document.getElementById('collectionsList');
+        if (!list) return;
+
+        if (!this.state.collections || this.state.collections.length === 0) {
+            list.innerHTML = `
+                <div class="empty-widget" style="text-align:center; padding:40px 20px;">
+                    <div style="font-size:40px; margin-bottom:12px;">📂</div>
+                    <div>Henüz koleksiyonun yok. Hemen bir tane oluştur!</div>
+                </div>`;
+            return;
+        }
+
+        list.innerHTML = this.state.collections.map(c => `
+            <div class="collection-card" onclick="App.openCollectionDetail('${c.id}')">
+                <div class="collection-title">${c.name}</div>
+                <div class="collection-count">${c.items.length} içerik</div>
+            </div>
+        `).join('');
+    },
+
+    openNewCollectionModal() {
+        const name = prompt('Koleksiyon adı:');
+        if (name) {
+            if (!this.state.collections) this.state.collections = [];
+            const newColl = {
+                id: Date.now().toString(),
+                name: name,
+                items: [], // {id, type}
+                createdAt: Date.now()
+            };
+            this.state.collections.push(newColl);
+            this.save();
+            this.renderCollections();
+            this.showToast('Koleksiyon oluşturuldu! 📂');
+        }
+    },
+
+    openCollectionDetail(id) {
+        const coll = this.state.collections.find(c => c.id === id);
+        if (!coll) return;
+        
+        document.getElementById('collModalTitle').innerText = coll.name;
+        const grid = document.getElementById('collItemsList');
+        grid.innerHTML = '';
+
+        if (coll.items.length === 0) {
+            grid.innerHTML = '<div class="empty-widget" style="grid-column: 1/-1;">Bu liste henüz boş.</div>';
+        } else {
+            coll.items.forEach(itemRef => {
+                let item;
+                if (itemRef.type === 'movie') item = this.state.movies.find(x => x.id === itemRef.id);
+                else if (itemRef.type === 'series') item = this.state.series.find(x => x.id === itemRef.id);
+                else if (itemRef.type === 'book') item = this.state.books.find(x => x.id === itemRef.id);
+
+                if (item) {
+                    const card = document.createElement('div');
+                    card.className = 'movie-card';
+                    card.innerHTML = `
+                        <div class="movie-poster">
+                            <img src="${item.poster || item.cover || ''}" onerror="this.outerHTML='<div class=\\'movie-poster-placeholder\\'>🎬</div>'" />
+                        </div>
+                        <div class="movie-info">
+                            <div class="movie-title">${item.title}</div>
+                            <div class="movie-year">${item.year || ''}</div>
+                        </div>
+                    `;
+                    card.onclick = () => {
+                        this.closeCollModal();
+                        if (itemRef.type === 'movie') this.openMovieDetail(item.id);
+                        else if (itemRef.type === 'series') this.openSeriesDetail(item.id);
+                        else if (itemRef.type === 'book') this.openBookDetail(item.id);
+                    };
+                    grid.appendChild(card);
+                }
+            });
+        }
+        document.getElementById('collectionDetailModal').classList.add('open');
+    },
+
+    showCollections() {
+        this.switchTab('collections');
+        this.renderCollections();
+    },
+
+    openCollPicker(itemId, type) {
+        const modal = document.getElementById('collPickerModal');
+        const body = document.getElementById('collPickerBody');
+        if (!this.state.collections || this.state.collections.length === 0) {
+            body.innerHTML = `
+                <div style="text-align:center; padding:20px;">
+                    <p style="font-size:13px; color:var(--text2); margin-bottom:12px;">Henüz bir listen yok.</p>
+                    <button class="btn-primary" onclick="App.openNewCollectionModal()">+ Yeni Liste Oluştur</button>
+                </div>`;
+        } else {
+            body.innerHTML = this.state.collections.map(c => `
+                <div class="collection-card" onclick="App.addItemToCollection('${c.id}', '${itemId}', '${type}')">
+                    <div class="collection-title">${c.name}</div>
+                    <div class="collection-count">${c.items.length} içerik</div>
+                </div>
+            `).join('') + `<button class="btn-primary" onclick="App.openNewCollectionModal()" style="width:100%; margin-top:12px; background:var(--bg3);">+ Başka Liste Oluştur</button>`;
+        }
+        modal.classList.add('open');
+    },
+
+    addItemToCollection(collId, itemId, type) {
+        const coll = this.state.collections.find(c => c.id === collId);
+        if (coll) {
+            if (coll.items.some(x => x.id === itemId)) {
+                this.showToast('Bu içerik zaten listede var.');
+            } else {
+                coll.items.push({ id: itemId, type: type });
+                this.save();
+                this.showToast('Listeye eklendi! 📁');
+                document.getElementById('collPickerModal').classList.remove('open');
+                this.renderCollections();
+            }
+        }
+    },
+
+    closeCollModal() {
+        document.getElementById('collectionDetailModal').classList.remove('open');
+    },
+
     renderBooks() {
         const grid = document.getElementById('bookGrid');
         if (!grid) return;
 
+        const si = document.getElementById('searchInput');
+        const search = si ? si.value.trim().toLocaleLowerCase('tr') : '';
         const filterBtn = document.querySelector('#tab-books .filter-btn.active');
         const filter = filterBtn ? filterBtn.dataset.filter : 'all';
-        const sort = document.getElementById('bookSort') ? document.getElementById('bookSort').value : 'added';
-        const genreFilter = document.getElementById('bookGenreFilter') ? document.getElementById('bookGenreFilter').value : 'all';
+        const bs = document.getElementById('bookSort');
+        const sort = bs ? bs.value : 'added';
+        const bgf = document.getElementById('bookGenreFilter');
+        const genreFilter = bgf ? bgf.value : 'all';
 
         let filtered = (this.state.books || []).filter(b => {
-            if (filter !== 'all' && b.status !== filter) return false;
+            if (search && !b.title.toLocaleLowerCase('tr').includes(search)) return false;
+            if (filter === 'favorites') {
+                if (!b.favorite) return false;
+            } else if (filter !== 'all' && b.status !== filter) {
+                return false;
+            }
             if (genreFilter !== 'all' && (!b.genre || !b.genre.split(',').map(g => g.trim()).includes(genreFilter))) return false;
             return true;
         });
@@ -4163,23 +4713,30 @@ Object.assign(App, {
             const starHtml = book.rating ? `<div class="movie-rating" style="color:${starColor}">${'★'.repeat(book.rating)}<span style="color:var(--bg3)">${'★'.repeat(10 - book.rating)}</span></div>` : '';
 
             return `
-            <div class="movie-card" onclick="App.openBookDetail('${book.id}')">
-                <div class="movie-poster">
-                    ${book.cover ? `<img src="${book.cover}" loading="lazy" onerror="this.outerHTML='<div class=\\'movie-poster-placeholder\\'>📚</div>'" />` : `<div class="movie-poster-placeholder">📚</div>`}
-                    ${badge}
-                </div>
-                <div class="movie-info">
-                    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom:2px;">
-                        <div class="movie-title" style="margin-bottom:0;">${book.title}</div>
-                        <div onclick="event.stopPropagation(); App.toggleBookFavGrid('${book.id}')" style="font-size:16px; cursor:pointer; transition:transform 0.2s;" onmouseover="this.style.transform='scale(1.2)'" onmouseout="this.style.transform='scale(1)'">
-                            ${book.favorite ? '❤️' : '🤍'}
+            <div class="swipe-item" data-id="${book.id}" data-type="book">
+                <div class="swipe-bg swipe-action-left"><span class="swipe-icon">✅</span></div>
+                <div class="swipe-bg swipe-action-right"><span class="swipe-icon">❤️</span></div>
+                <div class="swipe-item-content">
+                    <div class="movie-card" onclick="App.openBookDetail('${book.id}')">
+                        <div class="movie-poster">
+                            ${(book.poster || book.cover) ? `<img src="${book.poster || book.cover}" loading="lazy" onerror="this.outerHTML='<div class=\\'movie-poster-placeholder\\'>📚</div>'" />` : `<div class="movie-poster-placeholder">📚</div>`}
+                            ${badge}
+                        </div>
+                        <div class="movie-info">
+                            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom:2px;">
+                                <div class="movie-title" style="margin-bottom:0;">${book.title}</div>
+                                <div onclick="event.stopPropagation(); App.toggleBookFavGrid('${book.id}')" style="font-size:16px; cursor:pointer; transition:transform 0.2s;" onmouseover="this.style.transform='scale(1.2)'" onmouseout="this.style.transform='scale(1)'">
+                                    ${book.favorite ? '❤️' : '🤍'}
+                                </div>
+                            </div>
+                            <div class="movie-year">${book.author || ''}${book.year ? ' · ' + book.year : ''}${book.pages ? ' · ' + book.pages + 'sf.' : ''}</div>
+                            ${starHtml}
                         </div>
                     </div>
-                    <div class="movie-year">${book.author || ''}${book.year ? ' · ' + book.year : ''}${book.pages ? ' · ' + book.pages + 'sf.' : ''}</div>
-                    ${starHtml}
                 </div>
             </div>`;
         }).join('');
+        this.bindSwipeEvents();
     },
 
     toggleBookFavGrid(id) {
@@ -4189,6 +4746,53 @@ Object.assign(App, {
             this.save();
             this.renderBooks();
             this.showToast(book.favorite ? 'Favorilere eklendi' : 'Favorilerden çıkarıldı');
+        }
+    },
+
+    openAvatarModal() {
+        const avatars = [
+            '👤', '👨‍🚀', '👩‍🚀', '🐱', '🐶', '🦊', '🦁', '🐸', '🐼', '🐨',
+            '🐲', '🤖', '👻', '👾', '👽', '🎃', '🧙‍♂️', '🧛‍♂️', '🦸‍♂️', '🥷',
+            '🎨', '🎬', '🍿', '🎸', '🎮', '⚽', '🏀', '🍕', '🌮', '🍩',
+            '🌈', '🔥', '✨', '💎', '🍀', '🦋', '🐳', '🦉', '🦄', '⚡'
+        ];
+        const grid = document.getElementById('avatarOptionsGrid');
+        if (grid) {
+            grid.innerHTML = avatars.map(a => `
+                <div class="avatar-option" onclick="App.selectAvatar('${a}')" style="font-size:32px; padding:8px; border-radius:12px; cursor:pointer; text-align:center; transition:0.2s; border:1px solid var(--border); background:var(--bg2);">
+                    ${a}
+                </div>
+            `).join('');
+        }
+        document.getElementById('avatarModal').classList.add('open');
+    },
+
+    async selectAvatar(emoji) {
+        if (!this.currentUser) return;
+        
+        try {
+            // Update UI immediately
+            const pad = document.getElementById('profileAvatarDisplay');
+            if (pad) pad.innerText = emoji;
+            
+            // Update Firestore 'users' collection
+            if (db) {
+                await db.collection('users').doc(this.currentUser).update({ avatar: emoji });
+            }
+            
+            // Update local state
+            if (this.state.currentUserData) {
+                this.state.currentUserData.avatar = emoji;
+            }
+            
+            this.showToast('Profil fotoğrafı güncellendi! ✨');
+            document.getElementById('avatarModal').classList.remove('open');
+            
+            // Re-render everything to reflect change (e.g. in social/friends lists if they use it)
+            this.renderAll();
+        } catch (e) {
+            console.error('Avatar update error:', e);
+            this.showToast('Hata: Fotoğraf güncellenemedi', true);
         }
     }
 

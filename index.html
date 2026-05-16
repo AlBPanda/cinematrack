@@ -20,10 +20,10 @@
 <body>
   <!-- Login Screen -->
   <div id="loginScreen" class="login-screen hidden">
-    <div class="login-card" id="loginCard">
+    <div class="login-card hidden" id="loginCard">
       <div class="login-icon">🍿</div>
-      <h2>CineTrack'e Hoşgeldin</h2>
-      <p>Kendi izleme listeni oluşturmak için bir profil adı gir.</p>
+      <h2>Tekrar Hoşgeldin!</h2>
+      <p>Hesabına giriş yap ve izlemeye devam et.</p>
       <input type="text" id="usernameInput" placeholder="Kullanıcı adınız (@handle)..." autocomplete="off"/>
       <div style="position:relative; margin-top:8px;">
         <input type="password" id="passwordInput" placeholder="Şifreniz..." autocomplete="off" style="width:100%; padding-right:40px;"/>
@@ -35,10 +35,10 @@
       </div>
     </div>
     
-    <div class="login-card hidden" id="registerCard">
+    <div class="login-card" id="registerCard">
       <div class="login-icon">✨</div>
-      <h2>Hesap Oluştur</h2>
-      <p>Diğer kullanıcılarla mesajlaşmak için bir hesap yarat.</p>
+      <h2>CineTrack'e Hoşgeldin!</h2>
+      <p>Bir hesap oluştur, izlediklerini takip etmeye başla.</p>
       <div class="avatar-selector" id="avatarSelector" style="display:flex; justify-content:center; gap: 12px; margin-bottom:16px; font-size:24px;">
         <div class="avatar-option selected" style="cursor:pointer; padding:4px; border:2px solid var(--primary); border-radius:50%;">👨</div>
         <div class="avatar-option" style="cursor:pointer; padding:4px; border:2px solid transparent; border-radius:50%;">👩</div>
@@ -231,6 +231,7 @@
           <button class="filter-btn" data-filter="watched">İzlendi</button>
           <button class="filter-btn" data-filter="watchlist">İzlenecek</button>
           <button class="filter-btn" data-filter="watching">İzleniyor</button>
+          <button class="filter-btn" data-filter="favorites">❤️ Favoriler</button>
         </div>
         <div class="sort-bar" style="display: flex; gap: 8px;">
           <select id="movieGenreFilter" class="sort-select" style="flex:1;">
@@ -260,6 +261,7 @@
           <button class="filter-btn" data-filter="completed">Bitti</button>
           <button class="filter-btn" data-filter="paused">Duraksatıldı</button>
           <button class="filter-btn" data-filter="watchlist">İzlenecek</button>
+          <button class="filter-btn" data-filter="favorites">❤️ Favoriler</button>
         </div>
         <div class="sort-bar" style="display: flex; gap: 8px;">
           <select id="seriesGenreFilter" class="sort-select" style="flex:1;">
@@ -287,8 +289,11 @@
         </header>
 
         <div class="profile-card">
-          <div class="profile-avatar">
-            <svg width="32" height="32" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          <div class="profile-avatar" onclick="App.openAvatarModal()" style="cursor:pointer; display:flex; align-items:center; justify-content:center; background:var(--bg2); border:2px solid var(--accent); position:relative;" title="Fotoğrafı Değiştir">
+            <span id="profileAvatarDisplay" style="font-size: 20px;">👤</span>
+            <div style="position:absolute; bottom:-4px; right:-4px; background:var(--accent); border-radius:50%; width:16px; height:16px; display:flex; align-items:center; justify-content:center; border:2px solid var(--bg1);">
+              <svg width="10" height="10" fill="white" viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+            </div>
           </div>
           <div class="profile-info">
             <h2 id="profileUserNameFull" style="font-size: 18px; font-weight: 700; margin-bottom: 4px;">Kullanıcı</h2>
@@ -323,6 +328,25 @@
               <span class="stat-label">Bölüm</span>
             </div>
           </div>
+          <!-- Book stats row -->
+          <div class="stats-row" style="margin-top:10px;">
+            <div class="stat-card">
+              <span class="stat-num" id="statBooksRead">0</span>
+              <span class="stat-label">Kitap Okundu</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-num" id="statBooksReading">0</span>
+              <span class="stat-label">Okunuyor</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-num" id="statBooksReadlist">0</span>
+              <span class="stat-label">Okunacak</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-num" id="statBooksPages">0</span>
+              <span class="stat-label">Toplam Sayfa</span>
+            </div>
+          </div>
         </div>
 
         <!-- Badges & Streak Section -->
@@ -347,13 +371,20 @@
         <!-- Advanced Stats (Chart.js) -->
         <div class="widget stats-widget" style="margin-bottom: 24px;">
           <h3 class="widget-title">📈 Gelişmiş İstatistikler</h3>
+          
+          <div class="filter-bar" style="margin-bottom: 16px; font-size: 11px;">
+            <button class="filter-btn active" data-chart="movie" onclick="App.switchChartTab('movie', this)">Film</button>
+            <button class="filter-btn" data-chart="series" onclick="App.switchChartTab('series', this)">Dizi</button>
+            <button class="filter-btn" data-chart="book" onclick="App.switchChartTab('book', this)">Kitap</button>
+          </div>
+
           <div style="position: relative; height: 180px; width: 100%; display: flex; justify-content: center;">
             <canvas id="genreChart"></canvas>
           </div>
         </div>
 
-        <div class="profile-actions" style="display: flex; gap: 12px; margin-bottom: 24px;">
-          <button class="btn-primary" id="btnWrapped" style="flex:1; background: linear-gradient(135deg, #f59e0b, #ec4899);">🎉 Aylık Özeti Gör</button>
+        <div class="profile-actions" style="display: flex; gap: 12px; margin-bottom: 24px; flex-wrap:wrap;">
+          <button class="btn-primary" id="btnWrapped" style="flex:1; min-width:140px; background: linear-gradient(135deg, var(--amber), var(--pink));">🎉 Aylık Özet</button>
         </div>
 
         <div class="theme-section">
@@ -402,6 +433,7 @@
           <button class="filter-btn" data-filter="read">Okundu</button>
           <button class="filter-btn" data-filter="reading">Okunuyor</button>
           <button class="filter-btn" data-filter="readlist">Okunacak</button>
+          <button class="filter-btn" data-filter="favorites">❤️ Favoriler</button>
         </div>
         <div class="sort-bar" style="display: flex; gap: 8px;">
           <select id="bookGenreFilter" class="sort-select" style="flex:1;">
@@ -486,6 +518,24 @@
         <!-- Hidden legacy usersList for compatibility -->
         <div id="usersList" style="display:none;"></div>
       </section>
+
+      <!-- Collections Tab -->
+      <section class="tab-content" id="tab-collections">
+        <header class="header" style="margin-bottom: 20px;">
+          <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
+            <button onclick="App.switchTab('profile')" style="background:var(--bg3); border:none; color:var(--text); width:36px; height:36px; border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer;">←</button>
+            <h1 class="header-title" style="font-size: 20px; font-weight:700; margin:0;">Koleksiyonlarım</h1>
+          </div>
+          <p class="header-subtitle" style="font-size:13px; color:var(--text2); margin-top:4px;">Favori içeriklerini tematik listelerde topla</p>
+        </header>
+        <button class="btn-primary" onclick="App.openNewCollectionModal()" style="width:100%; margin-bottom:20px;">+ Yeni Koleksiyon Oluştur</button>
+        <div id="collectionsList">
+          <div class="empty-widget" style="text-align:center; padding:40px 20px;">
+            <div style="font-size:40px; margin-bottom:12px;">📂</div>
+            <div>Henüz koleksiyonun yok. Hemen bir tane oluştur!</div>
+          </div>
+        </div>
+      </section>
     </main>
 
     <!-- Bottom Nav -->
@@ -547,6 +597,7 @@
             <input type="text" id="formTitle" placeholder="Film/Dizi adı yazın..." autocomplete="off" />
           </div>
           <div id="tmdbResults" class="tmdb-results hidden" style="position: absolute; top: 100%; left: 0; right: 0; z-index: 10; margin-top: 4px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 1px solid var(--purple);"></div>
+          <div id="bookSearchResults" class="tmdb-results hidden" style="position: absolute; top: 100%; left: 0; right: 0; z-index: 10; margin-top: 4px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 1px solid var(--purple);"></div>
         </div>
         <div class="form-row">
           <div class="form-group">
@@ -558,7 +609,7 @@
             <input type="text" id="formGenre" placeholder="Drama, Aksiyon..." />
           </div>
         </div>
-        <div class="form-group">
+        <div class="form-group" id="platformFieldWrap">
           <label>Platform (Nereden izleyeceksin?)</label>
           <select id="formPlatform">
             <option value="">Seçilmedi</option>
@@ -617,6 +668,28 @@
           </div>
           <div id="seasonEpsWrap"></div>
         </div>
+
+        <!-- Book Fields -->
+        <div id="bookFields" class="hidden">
+          <div class="form-group">
+            <label>Yazar</label>
+            <input type="text" id="bookAuthor" placeholder="Yazar adı..." autocomplete="off" />
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Sayfa Sayısı</label>
+              <input type="number" id="bookPages" placeholder="300" min="1" />
+            </div>
+            <div class="form-group">
+              <label>Durum</label>
+              <select id="bookStatus">
+                <option value="readlist">Okunacak</option>
+                <option value="reading">Okunuyor</option>
+                <option value="read">Okundu</option>
+              </select>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="modal-footer">
@@ -626,65 +699,7 @@
     </div>
   </div>
 
-  <!-- Book Add/Edit Modal -->
-  <div class="modal-overlay" id="bookModal">
-    <div class="modal">
-      <div class="modal-header">
-        <h2 id="bookModalTitle">📚 Kitap Ekle</h2>
-        <button class="modal-close" id="bookModalCloseBtn">✕</button>
-      </div>
-      <div class="modal-body">
-        <input type="hidden" id="bookFormId" value="" />
-        <!-- Open Library Search -->
-        <div class="form-group" style="position: relative;">
-          <label>Kitap Adı * <small style="color:var(--text3); font-weight:normal;">(Yazarken otomatik aranır)</small></label>
-          <div class="tmdb-search-row">
-            <svg class="tmdb-search-icon" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
-            <input type="text" id="bookFormTitle" placeholder="Kitap adı yazın..." autocomplete="off" />
-          </div>
-          <div id="bookSearchResults" class="tmdb-results hidden" style="position: absolute; top: 100%; left: 0; right: 0; z-index: 10; margin-top: 4px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 1px solid var(--purple);"></div>
-        </div>
-        <div class="form-group">
-          <label>Yazar</label>
-          <input type="text" id="bookFormAuthor" placeholder="Yazar adı..." autocomplete="off" />
-        </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label>Yıl</label>
-            <input type="number" id="bookFormYear" placeholder="2024" min="1000" max="2030" />
-          </div>
-          <div class="form-group">
-            <label>Sayfa Sayısı</label>
-            <input type="number" id="bookFormPages" placeholder="300" min="1" />
-          </div>
-        </div>
-        <div class="form-group">
-          <label>Tür</label>
-          <input type="text" id="bookFormGenre" placeholder="Roman, Bilim Kurgu..." />
-        </div>
-        <div class="form-group">
-          <label>Durum</label>
-          <select id="bookFormStatus">
-            <option value="readlist">Okunacak</option>
-            <option value="reading">Okunuyor</option>
-            <option value="read">Okundu</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label>Kapak URL (opsiyonel)</label>
-          <input type="url" id="bookFormCover" placeholder="https://..." />
-        </div>
-        <div class="form-group">
-          <label>Not / Konu</label>
-          <textarea id="bookFormNote" placeholder="Düşünceleriniz, konu..." rows="2"></textarea>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn-ghost" id="bookModalCancelBtn">İptal</button>
-        <button class="btn-primary" id="bookModalSaveBtn">Kaydet</button>
-      </div>
-    </div>
-  </div>
+
 
   <!-- Book Detail Modal -->
   <div class="modal-overlay" id="bookDetailModal">
@@ -986,6 +1001,21 @@
       </div>
       <div class="modal-body" id="wpContentPickerList" style="overflow-y:auto; padding:16px;">
         <!-- JS ile doldurulur -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Avatar Selection Modal -->
+  <div class="modal-overlay" id="avatarModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Profil Fotoğrafı Seç</h2>
+        <button class="modal-close" onclick="document.getElementById('avatarModal').classList.remove('open')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="avatarOptionsGrid" style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-top: 8px; padding-bottom: 20px;">
+          <!-- Populated by JS -->
+        </div>
       </div>
     </div>
   </div>
