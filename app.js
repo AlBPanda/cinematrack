@@ -125,7 +125,7 @@ const App = {
         document.getElementById('loginBtn').addEventListener('click', async () => {
             const handle = document.getElementById('usernameInput').value.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
             const password = document.getElementById('passwordInput').value.trim();
-            if (!handle || !password) return alert('Kullanıcı adı ve şifre gereklidir.');
+            if (!handle || !password) return this.showToast('Kullanıcı adı ve şifre gereklidir.', true);
 
             this.setAuthLoading(true, 'Giriş yapılıyor...');
             try {
@@ -133,9 +133,9 @@ const App = {
                 // onAuthStateChanged will handle the rest
             } catch (err) {
                 this.setAuthLoading(false);
-                if (err.code === 'auth/user-not-found') return alert('Kullanıcı bulunamadı. Lütfen kayıt olun.');
-                if (err.code === 'auth/wrong-password') return alert('Hatalı şifre.');
-                alert('Giriş hatası: ' + err.message);
+                if (err.code === 'auth/user-not-found') return this.showToast('Kullanıcı bulunamadı. Lütfen kayıt olun.', true);
+                if (err.code === 'auth/wrong-password') return this.showToast('Hatalı şifre.', true);
+                this.showToast('Giriş hatası: ' + err.message, true);
             }
         });
 
@@ -148,8 +148,8 @@ const App = {
                 const avatarEl = document.querySelector('.avatar-option.selected');
                 const avatar = avatarEl ? avatarEl.innerText : '👤';
 
-                if (!name || !handle || !password) return alert('Ad, Kullanıcı Adı ve Şifre zorunludur.');
-                if (password.length < 6) return alert('Şifre en az 6 karakter olmalıdır.');
+                if (!name || !handle || !password) return this.showToast('Ad, Kullanıcı Adı ve Şifre zorunludur.', true);
+                if (password.length < 6) return this.showToast('Şifre en az 6 karakter olmalıdır.', true);
 
                 this.setAuthLoading(true, 'Hesap oluşturuluyor...');
                 try {
@@ -164,8 +164,8 @@ const App = {
                     // onAuthStateChanged will handle the rest
                 } catch (err) {
                     this.setAuthLoading(false);
-                    if (err.code === 'auth/email-already-in-use') return alert('Bu kullanıcı adı zaten alınmış.');
-                    alert('Kayıt hatası: ' + err.message);
+                    if (err.code === 'auth/email-already-in-use') return this.showToast('Bu kullanıcı adı zaten alınmış.', true);
+                    this.showToast('Kayıt hatası: ' + err.message, true);
                 }
             });
         }
@@ -419,6 +419,8 @@ const App = {
 
         if (showToast) {
             this.showToast('Tema değiştirildi');
+            // Auto close theme modal after selection
+            setTimeout(() => this.closeModals(), 400);
         }
     },
 
@@ -894,13 +896,27 @@ const App = {
     },
 
     switchTab(tab) {
+        if (this.currentTab === tab) return;
+
+        const tabs = ['dashboard', 'movies', 'series', 'books', 'social', 'profile'];
+        const oldIndex = tabs.indexOf(this.currentTab);
+        const newIndex = tabs.indexOf(tab);
+        const direction = newIndex > oldIndex ? 'next' : 'prev';
+
         this.currentTab = tab;
         document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
         const navItem = document.querySelector(`.nav-item[data-tab="${tab}"]`);
         if (navItem) navItem.classList.add('active');
         
-        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-        document.getElementById(`tab-${tab}`).classList.add('active');
+        document.querySelectorAll('.tab-content').forEach(c => {
+            c.classList.remove('active', 'slide-left', 'slide-right');
+        });
+        
+        const newTab = document.getElementById(`tab-${tab}`);
+        if (newTab) {
+            newTab.classList.add('active');
+            newTab.classList.add(direction === 'next' ? 'slide-left' : 'slide-right');
+        }
 
         if (tab === 'dashboard') this.renderDashboard();
         if (tab === 'movies') this.renderMovies();
@@ -915,7 +931,6 @@ const App = {
             }
             this.renderSocialTab();
         }
-        // Profile tab doesn't need specific render logic right now
     },
 
     // Star rating was removed from the add modal
@@ -1267,8 +1282,8 @@ const App = {
         this.showToast(isEdit ? 'Güncellendi' : 'Eklendi');
     },
 
-    deleteItem(type) {
-        if (!confirm('Silmek istediğine emin misin?')) return;
+    async deleteItem(type) {
+        if (!await this.showConfirm('İçeriği Sil', 'Silmek istediğine emin misin?', '🗑️')) return;
 
         if (type === 'movie') {
             const m = this.state.movies.find(x => x.id === this.editingId);
@@ -2940,7 +2955,7 @@ const App = {
         setTimeout(() => this.isLongPressing = false, 500);
 
         const u = this.state.globalUsers.find(x => x.handle === handle) || { name: handle };
-        if (!confirm(`${u.name} ile olan sohbeti silmek istediğinize emin misiniz?`)) {
+        if (!await this.showConfirm('Sohbeti Sil', `${u.name} ile olan sohbeti silmek istediğinize emin misiniz?`, '💬')) {
             return;
         }
 
@@ -3756,7 +3771,7 @@ const App = {
         const data = this._wpCurrentPartyData;
         // Host odayı kapatsın
         if (data && data.host === this.currentUser) {
-            if (!confirm('Odayı kapatmak istediğinize emin misiniz? Tüm üyeler çıkarılacak.')) return;
+            if (!await this.showConfirm('Odayı Kapat', 'Odayı kapatmak istediğinize emin misiniz? Tüm üyeler çıkarılacak.', '🍿')) return;
             try {
                 await db.collection('watchparties').doc(this.currentWatchPartyId).update({ status: 'closed' });
             } catch (e) {}
@@ -3988,6 +4003,15 @@ const App = {
             } else {
                 badge.style.display = 'none';
             }
+        }
+    },
+
+    openThemeModal() {
+        const modal = document.getElementById('themeModal');
+        if (modal) {
+            modal.classList.add('open');
+            modal.style.display = 'flex';
+            this.pushHistoryState('modal');
         }
     },
 
@@ -4296,7 +4320,7 @@ const App = {
     async deleteAccount() {
         if (!this.currentUser) return;
         
-        const confirmDelete = confirm('Hesabınızı kalıcı olarak silmek istediğinize emin misiniz? Bu işlem geri alınamaz.');
+        const confirmDelete = await this.showConfirm('Hesabı Sil', 'Hesabınızı kalıcı olarak silmek istediğinize emin misiniz? Bu işlem geri alınamaz.', '🗑️');
         if (!confirmDelete) return;
 
         try {
@@ -4309,19 +4333,51 @@ const App = {
             if (auth && auth.currentUser) {
                 await auth.currentUser.delete();
             }
-            alert('Hesabınız başarıyla silindi.');
+            this.showToast('Hesabınız başarıyla silindi.');
             await this.logout();
         } catch(e) {
-            alert('Silme hatası: ' + e.message);
+            this.showToast('Silme hatası: ' + e.message, true);
         }
     },
 
-    confirmClearLibrary(type) {
+    showConfirm(title, message, icon = '⚠️') {
+        return new Promise((resolve) => {
+            const modal = document.getElementById('confirmModal');
+            const titleEl = document.getElementById('confirmTitle');
+            const msgEl = document.getElementById('confirmMessage');
+            const iconEl = document.getElementById('confirmIcon');
+            const confirmBtn = document.getElementById('confirmBtn');
+            const cancelBtn = document.getElementById('confirmCancelBtn');
+
+            titleEl.innerText = title;
+            msgEl.innerText = message;
+            iconEl.innerText = icon;
+
+            modal.classList.add('open');
+
+            const cleanup = (result) => {
+                modal.classList.remove('open');
+                confirmBtn.onclick = null;
+                cancelBtn.onclick = null;
+                resolve(result);
+            };
+
+            confirmBtn.onclick = () => cleanup(true);
+            cancelBtn.onclick = () => cleanup(false);
+            modal.onclick = (e) => {
+                if (e.target === modal) cleanup(false);
+            };
+        });
+    },
+
+    async confirmClearLibrary(type) {
         const typeNames = { movie: 'tüm filmleri', series: 'tüm dizileri', book: 'tüm kitapları' };
         const name = typeNames[type];
 
-        if (confirm(`Seçtiğiniz kütüphanedeki (${name}) verileri silmek istediğinize emin misiniz?`)) {
-            if (confirm(`DİKKAT: Bu işlem geri alınamaz! ${name.toUpperCase()} kalıcı olarak silinecek. Onaylıyor musunuz?`)) {
+        const firstConfirm = await this.showConfirm('Kütüphaneyi Temizle', `Seçtiğiniz kütüphanedeki (${name}) verileri silmek istediğinize emin misiniz?`, '🧹');
+        if (firstConfirm) {
+            const secondConfirm = await this.showConfirm('SON UYARI', `DİKKAT: Bu işlem geri alınamaz! ${name.toUpperCase()} kalıcı olarak silinecek. Onaylıyor musunuz?`, '🚨');
+            if (secondConfirm) {
                 this.clearLibrary(type);
             }
         }
@@ -4752,9 +4808,9 @@ Object.assign(App, {
         }
     },
 
-    deleteBook() {
+    async deleteBook() {
         if (!this._currentBookDetailId) return;
-        if (!confirm('Bu kitabı silmek istediğine emin misin?')) return;
+        if (!await this.showConfirm('Kitabı Sil', 'Bu kitabı silmek istediğine emin misin?', '📚')) return;
         this.state.books = this.state.books.filter(b => b.id !== this._currentBookDetailId);
         this.save();
         this.closeModals();
@@ -5092,13 +5148,17 @@ Object.assign(App, {
             startY = e.touches[0].clientY;
         }, {passive: true});
         main.addEventListener('touchend', (e) => {
-            if (document.querySelector('.modal.open')) return;
+            if (document.querySelector('.modal-overlay.open')) return;
             const endX = e.changedTouches[0].clientX;
             const endY = e.changedTouches[0].clientY;
             const diffX = endX - startX;
             const diffY = endY - startY;
             if (Math.abs(diffX) > 80 && Math.abs(diffY) < 60) {
-                const tabs = ['dashboard', 'movies', 'series', 'books', 'social', 'profile'];
+                const canSeeSocial = ['deniz', 'kermode'].includes(this.currentUser);
+                let tabs = ['dashboard', 'movies', 'series', 'books', 'profile'];
+                if (canSeeSocial) {
+                    tabs = ['dashboard', 'movies', 'series', 'books', 'social', 'profile'];
+                }
                 const currentTab = this.currentTab || 'dashboard';
                 let currentIndex = tabs.indexOf(currentTab);
                 if (diffX > 0 && currentIndex > 0) this.switchTab(tabs[currentIndex - 1]);

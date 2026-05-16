@@ -145,12 +145,12 @@
     <main class="main-content">
       <!-- Dashboard Tab -->
       <section class="tab-content active" id="tab-dashboard">
-        <header class="header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 24px;">
+        <header class="header">
           <div>
             <h1 class="header-title" style="font-size: 20px; font-weight:700;">Hoşgeldin, <span id="userNameDisplay" style="color:var(--primary);">...</span> 👋</h1>
-            <p class="header-subtitle" style="font-size:13px; color:var(--text2); margin-top:4px;">İzleme durumun harika görünüyor!</p>
+            <p class="header-subtitle">İzleme durumun harika görünüyor!</p>
           </div>
-          <div style="text-align:right; display:flex; flex-direction:column; align-items:flex-end;">
+          <div class="header-right" style="display:flex; flex-direction:column; align-items:flex-end;">
             <div id="liveClock" style="font-size: 16px; font-weight: 700; font-family: 'Outfit', sans-serif; color: var(--text);">00:00</div>
             <div id="liveDate" style="font-size: 11px; color: var(--text3); margin-top:2px;">--</div>
           </div>
@@ -252,16 +252,14 @@
       </section>
 
       <section class="tab-content" id="tab-movies">
-        <header class="header" style="margin-bottom: 24px; background: rgba(168, 85, 247, 0.1); padding: 20px; border-radius: var(--radius); border: 1px solid rgba(168, 85, 247, 0.2);">
-          <div style="display:flex; justify-content:space-between; align-items:center;">
-            <div>
-              <h1 class="header-title" style="font-size: 22px; font-weight:800; letter-spacing: -0.5px;">🎬 Film Kitaplığım</h1>
-              <p class="header-subtitle" style="font-size:13px; color:var(--text2); margin-top:4px;">İzlediğin ve keşfedeceğin tüm yapımlar</p>
-            </div>
-            <div style="text-align:right;">
-              <div style="font-size: 14px; font-weight: 700; color: var(--green);">✅ <span id="headerMoviesWatched">0</span> İzlendi</div>
-              <div style="font-size: 14px; font-weight: 700; color: var(--amber); margin-top: 2px;">⏳ <span id="headerMoviesWatchlist">0</span> İzlenecek</div>
-            </div>
+        <header class="tab-header movie-header">
+          <div class="tab-header-left">
+            <h1 class="tab-header-title">🎬 Film Kitaplığım</h1>
+            <p class="tab-header-subtitle">İzlediğin ve keşfedeceğin tüm yapımlar</p>
+          </div>
+          <div class="tab-header-right">
+            <div class="tab-header-stat" style="color: var(--green);">✅ <span id="headerMoviesWatched">0</span> İzlendi</div>
+            <div class="tab-header-stat" style="color: var(--amber);">⏳ <span id="headerMoviesWatchlist">0</span> İzlenecek</div>
           </div>
         </header>
         <div class="filter-bar">
@@ -292,16 +290,14 @@
       </section>
 
       <section class="tab-content" id="tab-series">
-        <header class="header" style="margin-bottom: 24px; background: rgba(99, 102, 241, 0.1); padding: 20px; border-radius: var(--radius); border: 1px solid rgba(99, 102, 241, 0.2);">
-          <div style="display:flex; justify-content:space-between; align-items:center;">
-            <div>
-              <h1 class="header-title" style="font-size: 22px; font-weight:800; letter-spacing: -0.5px;">📺 Dizi Kitaplığım</h1>
-              <p class="header-subtitle" style="font-size:13px; color:var(--text2); margin-top:4px;">Bölüm bölüm tüm serüvenlerin</p>
-            </div>
-            <div style="text-align:right;">
-              <div style="font-size: 14px; font-weight: 700; color: var(--green);">✅ <span id="headerSeriesCompleted">0</span> Bitti</div>
-              <div style="font-size: 14px; font-weight: 700; color: var(--primary); margin-top: 2px;">🎬 <span id="headerSeriesWatching">0</span> İzleniyor</div>
-            </div>
+        <header class="tab-header series-header">
+          <div class="tab-header-left">
+            <h1 class="tab-header-title">📺 Dizi Kitaplığım</h1>
+            <p class="tab-header-subtitle">Bölüm bölüm tüm serüvenlerin</p>
+          </div>
+          <div class="tab-header-right">
+            <div class="tab-header-stat" style="color: var(--green);">✅ <span id="headerSeriesCompleted">0</span> Bitti</div>
+            <div class="tab-header-stat" style="color: var(--primary);">🎬 <span id="headerSeriesWatching">0</span> İzleniyor</div>
           </div>
         </header>
         <div class="filter-bar">
@@ -418,7 +414,7 @@
         </div>
 
         <!-- Advanced Stats (Chart.js) -->
-        <div class="widget stats-widget" style="margin-bottom: 24px;">
+        <div class="widget stats-widget hidden" style="margin-bottom: 24px;">
           <h3 class="widget-title">📈 Gelişmiş İstatistikler</h3>
           
           <div class="filter-bar" style="margin-bottom: 16px; font-size: 11px;">
@@ -435,33 +431,17 @@
           <button class="btn-primary" id="btnWrapped" style="flex:1; min-width:140px; background: linear-gradient(135deg, var(--amber), var(--pink));">🎉 Aylık Özet</button>
         </div>
 
-        <div class="theme-section">
-          <h3 style="font-size: 15px; font-weight: 600; margin-bottom: 8px;">Tema Seçimi</h3>
-          <p style="font-size: 13px; color: var(--text2); margin-bottom: 16px;">Uygulamanın görünümünü kendi zevkine göre özelleştir.</p>
-          <div class="theme-grid">
-            <div class="theme-card active" data-theme="default" onclick="App.changeTheme('default')">
-              <div class="theme-preview" style="background: linear-gradient(135deg, #a855f7, #ec4899);"></div>
-              <div class="theme-name">Neon Gece</div>
+        <div class="theme-trigger-section" style="margin-bottom: 24px;">
+          <button class="widget" onclick="App.openThemeModal()" style="width: 100%; display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; background: var(--bg2); border: 1px solid var(--border); cursor: pointer;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+              <div style="width: 32px; height: 32px; border-radius: 8px; background: linear-gradient(135deg, var(--primary), var(--pink)); display: flex; align-items: center; justify-content: center; color: white;">🎨</div>
+              <div style="text-align: left;">
+                <div style="font-size: 15px; font-weight: 600; color: var(--text);">Tema ve Görünüm</div>
+                <div style="font-size: 12px; color: var(--text2);">Uygulamayı kişiselleştir</div>
+              </div>
             </div>
-            <div class="theme-card" data-theme="crimson" onclick="App.changeTheme('crimson')">
-              <div class="theme-preview" style="background: linear-gradient(135deg, #dc2626, #f59e0b);"></div>
-              <div class="theme-name">Kızıl Şafak</div>
-            </div>
-            <div class="theme-card" data-theme="forest" onclick="App.changeTheme('forest')">
-              <div class="theme-preview" style="background: linear-gradient(135deg, #10b981, #84cc16);"></div>
-              <div class="theme-name">Orman Fısıltısı</div>
-            </div>
-            <div class="theme-card" data-theme="glacier" onclick="App.changeTheme('glacier')">
-              <div class="theme-preview" style="background: linear-gradient(135deg, #3b82f6, #06b6d4);"></div>
-              <div class="theme-name">Buzul Mavisi</div>
-            </div>
-
-            <!-- Easter Egg Theme -->
-            <div class="theme-card" id="themeDeniz" style="display: none;" data-theme="deniz" onclick="App.changeTheme('deniz')">
-              <div class="theme-preview" style="background: linear-gradient(135deg, #1e3a8a, #facc15);"></div>
-              <div class="theme-name">Başkent</div>
-            </div>
-          </div>
+            <div style="color: var(--text3);">→</div>
+          </button>
         </div>
 
         <div class="theme-section" style="margin-top: 24px;">
@@ -482,16 +462,14 @@
 
       <!-- Books Tab -->
       <section class="tab-content" id="tab-books">
-        <header class="header" style="margin-bottom: 24px; background: rgba(245, 158, 11, 0.1); padding: 20px; border-radius: var(--radius); border: 1px solid rgba(245, 158, 11, 0.2);">
-          <div style="display:flex; justify-content:space-between; align-items:center;">
-            <div>
-              <h1 class="header-title" style="font-size: 22px; font-weight:800; letter-spacing: -0.5px;">📚 Kitap Kitaplığım</h1>
-              <p class="header-subtitle" style="font-size:13px; color:var(--text2); margin-top:4px;">Okuduğun ve okuyacağın tüm eserler</p>
-            </div>
-            <div style="text-align:right;">
-              <div style="font-size: 14px; font-weight: 700; color: var(--green);">📖 <span id="headerBooksRead">0</span> Okundu</div>
-              <div style="font-size: 14px; font-weight: 700; color: var(--amber); margin-top: 2px;">⏳ <span id="headerBooksReadlist">0</span> Okunacak</div>
-            </div>
+        <header class="tab-header book-header">
+          <div class="tab-header-left">
+            <h1 class="tab-header-title">📚 Kitap Kitaplığım</h1>
+            <p class="tab-header-subtitle">Okuduğun ve okuyacağın tüm eserler</p>
+          </div>
+          <div class="tab-header-right">
+            <div class="tab-header-stat" style="color: var(--green);">📖 <span id="headerBooksRead">0</span> Okundu</div>
+            <div class="tab-header-stat" style="color: var(--amber);">⏳ <span id="headerBooksReadlist">0</span> Okunacak</div>
           </div>
         </header>
         <div class="filter-bar">
@@ -620,15 +598,15 @@
         <span>Diziler</span>
         <span class="nav-badge" id="seriesBadge"></span>
       </button>
-      <button class="nav-item" data-tab="social" id="navSocial" style="display:none;">
-        <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-        <span>Sosyal</span>
-        <span class="nav-badge" id="messageBadge" style="display:none; background:var(--red);"></span>
-      </button>
       <button class="nav-item" data-tab="books" id="navBooks">
         <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
         <span>Kitaplar</span>
         <span class="nav-badge" id="bookBadge"></span>
+      </button>
+      <button class="nav-item" data-tab="social" id="navSocial" style="display:none;">
+        <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <span>Sosyal</span>
+        <span class="nav-badge" id="messageBadge" style="display:none; background:var(--red);"></span>
       </button>
       <button class="nav-item" data-tab="profile" id="navProfile">
         <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
@@ -1111,6 +1089,75 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
   
+  <!-- Custom Confirm Modal -->
+  <div class="modal-overlay" id="confirmModal">
+    <div class="modal confirm-modal" style="border-radius: 32px; max-width: 340px; margin: auto;">
+      <div class="modal-body" style="text-align: center; padding: 32px 24px;">
+        <div id="confirmIcon" style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
+        <h2 id="confirmTitle" style="font-size: 20px; font-weight: 800; margin-bottom: 12px; font-family: 'Outfit', sans-serif;">Emin misiniz?</h2>
+        <p id="confirmMessage" style="font-size: 14px; color: var(--text2); line-height: 1.6; margin-bottom: 24px;">Bu işlem geri alınamaz.</p>
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <button class="btn-primary" id="confirmBtn" style="width: 100%; padding: 14px; border-radius: 16px;">Evet, Onayla</button>
+          <button class="btn-ghost" id="confirmCancelBtn" style="width: 100%; padding: 14px; border-radius: 16px; border: none; background: rgba(255,255,255,0.05);">İptal Et</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Theme Selection Modal -->
+  <div class="modal-overlay" id="themeModal">
+    <div class="modal" style="border-radius: 32px; max-width: 400px; margin: auto;">
+      <div class="modal-header" style="padding: 24px 24px 12px; border: none; display: flex; align-items: center; justify-content: space-between;">
+        <h2 style="font-size: 20px; font-weight: 800; font-family: 'Outfit', sans-serif;">Görünüm Seç</h2>
+        <button class="modal-close-btn" onclick="App.closeModals()">
+          <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="modal-body" style="padding: 0 24px 32px; max-height: 70vh; overflow-y: auto;">
+        <p style="font-size: 13px; color: var(--text2); margin-bottom: 20px;">Uygulamanın görünümünü kendi zevkine göre özelleştir.</p>
+        <div class="theme-grid">
+          <div class="theme-card active" data-theme="default" onclick="App.changeTheme('default')">
+            <div class="theme-preview" style="background: linear-gradient(135deg, #a855f7, #ec4899);"></div>
+            <div class="theme-name">Neon Gece</div>
+          </div>
+          <div class="theme-card" data-theme="crimson" onclick="App.changeTheme('crimson')">
+            <div class="theme-preview" style="background: linear-gradient(135deg, #dc2626, #f59e0b);"></div>
+            <div class="theme-name">Kızıl Şafak</div>
+          </div>
+          <div class="theme-card" data-theme="forest" onclick="App.changeTheme('forest')">
+            <div class="theme-preview" style="background: linear-gradient(135deg, #10b981, #84cc16);"></div>
+            <div class="theme-name">Orman Fısıltısı</div>
+          </div>
+          <div class="theme-card" data-theme="glacier" onclick="App.changeTheme('glacier')">
+            <div class="theme-preview" style="background: linear-gradient(135deg, #3b82f6, #06b6d4);"></div>
+            <div class="theme-name">Buzul Mavisi</div>
+          </div>
+          <div class="theme-card" data-theme="sunset" onclick="App.changeTheme('sunset')">
+            <div class="theme-preview" style="background: linear-gradient(135deg, #f97316, #fbbf24);"></div>
+            <div class="theme-name">Gün Batımı</div>
+          </div>
+          <div class="theme-card" data-theme="midnight" onclick="App.changeTheme('midnight')">
+            <div class="theme-preview" style="background: linear-gradient(135deg, #6366f1, #1e2937);"></div>
+            <div class="theme-name">Gece Yarısı</div>
+          </div>
+          <div class="theme-card" data-theme="cyberpunk" onclick="App.changeTheme('cyberpunk')">
+            <div class="theme-preview" style="background: linear-gradient(135deg, #22c55e, #eab308);"></div>
+            <div class="theme-name">Cyberpunk</div>
+          </div>
+          <div class="theme-card" data-theme="starwars" onclick="App.changeTheme('starwars')">
+            <div class="theme-preview" style="background: linear-gradient(135deg, #FFE81F, #000);"></div>
+            <div class="theme-name">Star Wars</div>
+          </div>
+          <!-- Easter Egg Theme -->
+          <div class="theme-card" id="themeDeniz" style="display: none;" data-theme="deniz" onclick="App.changeTheme('deniz')">
+            <div class="theme-preview" style="background: linear-gradient(135deg, #1e3a8a, #facc15);"></div>
+            <div class="theme-name">Başkent</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script src="app.js"></script>
 </body>
 </html>
