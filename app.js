@@ -55,6 +55,8 @@ const App = {
 
     init() {
         console.log('App: init() started');
+        this.initPullToRefresh();
+        this.initHistory();
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('./sw.js').catch(err => console.log('SW fail', err));
         }
@@ -204,14 +206,6 @@ const App = {
         }
     },
 
-    async logout() {
-        if (auth) await auth.signOut();
-        this.currentUser = null;
-        this.state = { movies: [], series: [], books: [], goal: 5, goalCurrent: 0, goalWeek: '', streak: 0, lastWatchDate: null, globalUsers: [], currentUserData: null, following: [], followers: [], followRequests: [], sentRequests: [], hiddenChats: [] };
-        this.eventsBound = false;
-        document.getElementById('app').classList.add('hidden');
-        document.getElementById('loginScreen').classList.remove('hidden');
-    },
 
     async login(username, firebaseUser = null) {
         this.currentUser = username.toLowerCase();
@@ -475,6 +469,10 @@ const App = {
         if (this.watchPartyUnsubscribe) this.watchPartyUnsubscribe();
         if (this._wpInviteUnsubscribe) this._wpInviteUnsubscribe();
         this._wpKnownMemberships = {};
+        if (this.genreChartInstance) {
+            this.genreChartInstance.destroy();
+            this.genreChartInstance = null;
+        }
         if (auth) await auth.signOut();
         this.currentUser = null;
         this.state = { movies: [], series: [], books: [], goal: 5, goalCurrent: 0, goalWeek: '', streak: 0, lastWatchDate: null, globalUsers: [], currentUserData: null, following: [], followers: [], followRequests: [], sentRequests: [], hiddenChats: [] };
@@ -931,14 +929,30 @@ const App = {
 
         const type = document.querySelector('.type-btn.active').dataset.type;
         const endpoint = type === 'movie' ? 'movie' : 'tv';
-        const userLang = navigator.language || 'tr-TR';
+        
+        // Force Turkish results, but allow fallback if needed
+        const queryIsTurkish = /[ğüşıöçĞÜŞİÖÇ]/.test(query);
+        const searchLang = queryIsTurkish ? 'tr-TR' : 'tr-TR'; // We default to Turkish for this app
 
         try {
-            const res = await fetch(`https://api.themoviedb.org/3/search/${endpoint}?api_key=${TMDB_API_KEY}&language=${userLang}&query=${encodeURIComponent(query)}`);
+            const res = await fetch(`https://api.themoviedb.org/3/search/${endpoint}?api_key=${TMDB_API_KEY}&language=${searchLang}&include_adult=false&query=${encodeURIComponent(query)}`);
             const data = await res.json();
+            let results = data.results || [];
+
+            // Sort results to prioritize exact matches to localized title
+            results.sort((a, b) => {
+                const aTitle = (type === 'movie' ? a.title : a.name) || '';
+                const bTitle = (type === 'movie' ? b.title : b.name) || '';
+                
+                const aExact = aTitle.toLowerCase() === query.toLowerCase() ? 1 : 0;
+                const bExact = bTitle.toLowerCase() === query.toLowerCase() ? 1 : 0;
+                if (aExact !== bExact) return bExact - aExact;
+
+                return (b.popularity || 0) - (a.popularity || 0);
+            });
             
-            if (data.results && data.results.length > 0) {
-                resultsContainer.innerHTML = data.results.slice(0, 10).map(item => {
+            if (results.length > 0) {
+                resultsContainer.innerHTML = results.slice(0, 10).map(item => {
                     const title = type === 'movie' ? item.title : item.name;
                     const dateField = type === 'movie' ? item.release_date : item.first_air_date;
                     const year = dateField ? dateField.split('-')[0] : '';
@@ -978,12 +992,12 @@ const App = {
         resultsContainer.innerHTML = '<div class="tmdb-loading">Detaylar alınıyor...</div>';
 
         const endpoint = type === 'movie' ? 'movie' : 'tv';
-        const userLang = navigator.language || 'tr-TR';
+        const searchLang = 'tr-TR'; // Force Turkish for consistent metadata
 
         try {
             // Ana detay + IMDb ID'sini aynı anda çek
             const [detailRes, externalRes] = await Promise.all([
-                fetch(`https://api.themoviedb.org/3/${endpoint}/${id}?api_key=${TMDB_API_KEY}&language=${userLang}&append_to_response=credits`),
+                fetch(`https://api.themoviedb.org/3/${endpoint}/${id}?api_key=${TMDB_API_KEY}&language=${searchLang}&append_to_response=credits`),
                 fetch(`https://api.themoviedb.org/3/${endpoint}/${id}/external_ids?api_key=${TMDB_API_KEY}`)
             ]);
             const data = await detailRes.json();
@@ -1058,11 +1072,12 @@ const App = {
         document.getElementById('bookAuthor').value = '';
         document.getElementById('bookPages').value = '';
         document.getElementById('bookStatus').value = 'readlist';
-
+        document.getElementById('formGlobalRating').value = '';
         this.tempSeasonsData = null;
         this.tempImdbId = null;
 
         document.getElementById('addModal').classList.add('open');
+        this.pushHistoryState();
 
         const typeBtn = document.querySelector(`.type-btn[data-type="${type}"]`);
         if (typeBtn) typeBtn.click();
@@ -1113,10 +1128,21 @@ const App = {
 
         this.closeModals(false); // Close details modal without resetting edit state
         document.getElementById('addModal').classList.add('open');
+        this.pushHistoryState();
     },
 
-    closeModals(resetEditing = true) {
-        document.querySelectorAll('.modal-overlay').forEach(m => m.classList.remove('open'));
+    closeModals(resetEditing = true, syncHistory = true) {
+        const openModals = document.querySelectorAll('.modal-overlay.open');
+        if (openModals.length > 0 && syncHistory) {
+            history.back();
+            return;
+        }
+
+        document.querySelectorAll('.modal-overlay').forEach(m => {
+            m.classList.remove('open');
+            if (m.id === 'wpContentPickerModal') m.style.display = 'none';
+        });
+
         if (resetEditing) {
             this.editingId = null;
             this.editingType = null;
@@ -1330,6 +1356,10 @@ const App = {
 
     renderAll() {
         try {
+            if (!this._tabSwipeInitialized) {
+                this.initTabSwipe();
+                this._tabSwipeInitialized = true;
+            }
             this.updateBadges();
             this.updateGenreDropdowns();
             this.renderDashboard();
@@ -1492,13 +1522,24 @@ const App = {
 
         const sortedGenres = Object.entries(genreCounts).sort((a,b) => b[1] - a[1]).slice(0, 5);
         
-        if (sortedGenres.length === 0) {
-            // Nothing to show yet
-            return;
-        }
-
         if (this.genreChartInstance) {
             this.genreChartInstance.destroy();
+            this.genreChartInstance = null;
+        }
+
+        if (sortedGenres.length === 0) {
+            // Nothing to show yet, clear the canvas area
+            const canvas = document.getElementById('genreChart');
+            if (canvas) {
+                const ctx2d = canvas.getContext('2d');
+                ctx2d.clearRect(0, 0, canvas.width, canvas.height);
+                // Also clear the legend by resetting the chart instance if it exists
+                if (this.genreChartInstance) {
+                    this.genreChartInstance.destroy();
+                    this.genreChartInstance = null;
+                }
+            }
+            return;
         }
 
         const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -1571,13 +1612,36 @@ const App = {
 
     updateBadges() {
         const movieWatchlist = this.state.movies.filter(m => m.status === 'watchlist').length;
+        const movieWatched = this.state.movies.filter(m => m.status === 'watched').length;
         const seriesWatching = this.state.series.filter(s => s.status === 'watching').length;
+        const seriesCompleted = this.state.series.filter(s => s.status === 'completed').length;
+        const booksRead = (this.state.books || []).filter(b => b.status === 'read').length;
+        const booksReadlist = (this.state.books || []).filter(b => b.status === 'readlist').length;
         
         const mb = document.getElementById('movieBadge');
         if (mb) mb.innerText = movieWatchlist > 0 ? movieWatchlist : '';
         
         const sb = document.getElementById('seriesBadge');
         if (sb) sb.innerText = seriesWatching > 0 ? seriesWatching : '';
+
+        const bb = document.getElementById('bookBadge');
+        if (bb) bb.innerText = booksReadlist > 0 ? booksReadlist : '';
+
+        // Update Header Stats
+        const hmw = document.getElementById('headerMoviesWatched');
+        if (hmw) hmw.innerText = movieWatched;
+        const hmwl = document.getElementById('headerMoviesWatchlist');
+        if (hmwl) hmwl.innerText = movieWatchlist;
+
+        const hsc = document.getElementById('headerSeriesCompleted');
+        if (hsc) hsc.innerText = seriesCompleted;
+        const hsw = document.getElementById('headerSeriesWatching');
+        if (hsw) hsw.innerText = seriesWatching;
+
+        const hbr = document.getElementById('headerBooksRead');
+        if (hbr) hbr.innerText = booksRead;
+        const hbrl = document.getElementById('headerBooksReadlist');
+        if (hbrl) hbrl.innerText = booksReadlist;
     },
 
     renderDashboard() {
@@ -1600,7 +1664,8 @@ const App = {
             sew.innerText = totalEps;
         }
 
-        // Continue
+        // Continue Reading (Books)
+        // Continue Watching (Series)
         const continueList = document.getElementById('continueList');
         const watching = this.state.series.filter(s => s.status === 'watching');
         if (watching.length === 0) {
@@ -1626,6 +1691,38 @@ const App = {
                 </div>
                 `;
             }).join('');
+        }
+
+        // Continue Reading (Books)
+        const continueReadingList = document.getElementById('continueReadingList');
+        const reading = this.state.books.filter(b => b.status === 'reading');
+        if (continueReadingList) {
+            if (reading.length === 0) {
+                document.getElementById('continueReadingWidget').classList.add('hidden');
+            } else {
+                document.getElementById('continueReadingWidget').classList.remove('hidden');
+                continueReadingList.innerHTML = reading.map(b => {
+                    const current = b.currentPage || 0;
+                    const total = parseInt(b.pages) || 1;
+                    const perc = Math.min(100, Math.round((current / total) * 100));
+                    
+                    return `
+                    <div class="continue-item" onclick="App.openBookDetail('${b.id}')">
+                        <div class="continue-thumb">
+                            ${b.cover ? `<img src="${b.cover}" style="width:100%;height:100%;object-fit:cover;border-radius:6px;" onerror="this.outerHTML='📚'"/>` : '📚'}
+                        </div>
+                        <div class="continue-info" style="flex: 1;">
+                            <div class="continue-title">${b.title}</div>
+                            <div class="continue-sub">${current} / ${total} Sayfa</div>
+                            <div class="continue-prog" style="margin-top: 8px;">
+                                <div class="continue-prog-bar" style="width: ${perc}%"></div>
+                            </div>
+                        </div>
+                        <div class="continue-perc" style="font-size: 10px; font-weight: 700; color: var(--purple); margin-left: 10px;">%${perc}</div>
+                    </div>
+                    `;
+                }).join('');
+            }
         }
 
         // Recent
@@ -1672,6 +1769,9 @@ const App = {
                 this.loadDiscoverCarousel();
             }
         }
+
+        // Quote of the Day
+        this.renderQuote();
 
         // Goal
         const gi = document.getElementById('goalInput');
@@ -1725,6 +1825,66 @@ const App = {
             emojiEl.innerText = '🏆';
             svgElement.classList.add('completed');
         }
+    },
+
+    renderQuote() {
+        const quotes = [
+            { t: "Hayat, siz başka planlar yapmakla meşgulken başınıza gelenlerdir.", a: "John Lennon" },
+            { t: "Büyük işler başarmak için sadece harekete geçmek yetmez, aynı zamanda hayal etmelisiniz.", a: "Anatole France" },
+            { t: "İyi bir film, ancak onu izledikten sonra hayatınızda bir şeyler değişiyorsa iyidir.", a: "Akira Kurosawa" },
+            { t: "Kitapsız bir oda, ruhsuz bir vücut gibidir.", a: "Cicero" },
+            { t: "Okumak, başka birinin kafasıyla düşünmektir.", a: "Arthur Schopenhauer" },
+            { t: "Sinema, hayatın tüm sıkıcı kısımlarının ayıklandığı halidir.", a: "Alfred Hitchcock" },
+            { t: "Hayallerinizi küçümseyen insanlardan uzak durun.", a: "Mark Twain" }
+        ];
+        
+        const day = new Date().getDate();
+        const quote = quotes[day % quotes.length];
+        
+        const textEl = document.getElementById('quoteText');
+        const authEl = document.getElementById('quoteAuthor');
+        if (textEl && authEl) {
+            textEl.innerText = `"${quote.t}"`;
+            authEl.innerText = `— ${quote.a}`;
+        }
+    },
+
+    updateBookDetailProgressUI(e, total) {
+        const val = parseInt(e.target.value);
+        const perc = Math.min(100, Math.round((val / total) * 100));
+        const widget = e.target.closest('.stats-widget');
+        if (widget) {
+            widget.querySelector('b').innerText = `${val} / ${total} Sayfa`;
+            widget.querySelector('span[style*="color:var(--purple)"]').innerText = `%${perc}`;
+        }
+    },
+
+    updateBookProgressUI(e, id, total) {
+        const val = parseInt(e.target.value);
+        const perc = Math.min(100, Math.round((val / total) * 100));
+        const item = e.target.closest('.continue-item');
+        if (item) {
+            item.querySelector('.continue-sub').innerText = `${val} / ${total} Sayfa`;
+            item.querySelector('.continue-perc').innerText = `%${perc}`;
+        }
+    },
+
+    async saveBookProgress(id, page, total) {
+        const pageNum = parseInt(page);
+        const bookIndex = this.state.books.findIndex(b => b.id === id);
+        if (bookIndex === -1) return;
+
+        const book = { ...this.state.books[bookIndex] };
+        book.currentPage = pageNum;
+
+        if (pageNum >= total && total > 0) {
+            book.status = 'read';
+            this.showToast('Tebrikler! Kitabı bitirdin. 📚');
+        }
+
+        this.state.books[bookIndex] = book;
+        await this.save();
+        this.renderAll();
     },
 
     renderMovies() {
@@ -2011,6 +2171,7 @@ const App = {
             favBtn.innerText = m.favorite ? '❤️ Favoriden Çıkar' : '🤍 Favori';
         }
         document.getElementById('movieDetailModal').classList.add('open');
+        this.pushHistoryState();
     },
 
     openSeriesDetail(id) {
@@ -2099,6 +2260,7 @@ const App = {
             favBtn.innerText = s.favorite ? '❤️ Favoriden Çıkar' : '🤍 Favoriye Ekle';
         }
         document.getElementById('seriesDetailModal').classList.add('open');
+        this.pushHistoryState();
     },
 
     toggleEpisode(seriesId, epId, btn) {
@@ -3896,6 +4058,7 @@ const App = {
         }
 
         document.getElementById('otherProfileModal').classList.add('open');
+        this.pushHistoryState();
     },
 
     openChat(handle) {
@@ -3910,6 +4073,7 @@ const App = {
 
         this.renderMessages();
         document.getElementById('chatModal').classList.add('open');
+        this.pushHistoryState();
         setTimeout(() => document.getElementById('chatInput').focus(), 100);
     },
 
@@ -4088,6 +4252,7 @@ const App = {
         const list = document.getElementById('followList');
         list.innerHTML = '<div style="text-align:center; color:var(--text3); padding:20px;">Yükleniyor...</div>';
         document.getElementById('followModal').classList.add('open');
+        this.pushHistoryState();
 
         if (type === 'following') {
             title.innerText = 'Takip Ettiklerin';
@@ -4149,7 +4314,96 @@ const App = {
         } catch(e) {
             alert('Silme hatası: ' + e.message);
         }
-    }
+    },
+
+    confirmClearLibrary(type) {
+        const typeNames = { movie: 'tüm filmleri', series: 'tüm dizileri', book: 'tüm kitapları' };
+        const name = typeNames[type];
+
+        if (confirm(`Seçtiğiniz kütüphanedeki (${name}) verileri silmek istediğinize emin misiniz?`)) {
+            if (confirm(`DİKKAT: Bu işlem geri alınamaz! ${name.toUpperCase()} kalıcı olarak silinecek. Onaylıyor musunuz?`)) {
+                this.clearLibrary(type);
+            }
+        }
+    },
+
+    async clearLibrary(type) {
+        if (!this.currentUser) return;
+        
+        try {
+            if (type === 'movie') {
+                this.state.movies = [];
+                // Reset goal if it was based on movies
+                this.state.goalCurrent = 0;
+            } else if (type === 'series') {
+                this.state.series = [];
+            } else if (type === 'book') {
+                this.state.books = [];
+            }
+
+            this.save();
+            this.renderAll();
+            this.showToast('Kütüphane temizlendi ✨');
+        } catch (e) {
+            console.error('Clear library error:', e);
+            this.showToast('Hata: Kütüphane temizlenemedi', true);
+        }
+    },
+
+    initPullToRefresh() {
+        let touchStartY = 0;
+        let pullDistance = 0;
+        const threshold = 120;
+        const appEl = document.getElementById('app');
+        const ptrEl = document.getElementById('ptrIndicator');
+
+        document.addEventListener('touchstart', (e) => {
+            const scrollEl = document.querySelector('.main-content');
+            if (scrollEl && scrollEl.scrollTop <= 0) {
+                touchStartY = e.touches[0].clientY;
+            } else {
+                touchStartY = 0;
+            }
+        }, { passive: true });
+
+        document.addEventListener('touchmove', (e) => {
+            if (touchStartY === 0) return;
+            
+            const currentY = e.touches[0].clientY;
+            const diff = currentY - touchStartY;
+            
+            if (diff > 0) {
+                pullDistance = Math.pow(diff, 0.8); // Resistance
+                
+                if (pullDistance > 10) {
+                    appEl.classList.add('ptr-active');
+                    appEl.style.transform = `translateY(${pullDistance}px)`;
+                    ptrEl.style.transform = `translateY(${Math.min(pullDistance - 40, 40)}px)`;
+                    
+                    const icon = ptrEl.querySelector('svg');
+                    if (icon) icon.style.transform = `rotate(${pullDistance * 3}deg)`;
+                }
+            }
+        }, { passive: false }); // Need false to prevent default scroll if we are pulling
+
+        document.addEventListener('touchend', () => {
+            if (pullDistance > threshold) {
+                appEl.classList.add('ptr-refreshing');
+                appEl.style.transform = `translateY(60px)`;
+                ptrEl.style.transform = `translateY(40px)`;
+                
+                setTimeout(() => {
+                    location.reload();
+                }, 800);
+            } else {
+                appEl.style.transform = '';
+                ptrEl.style.transform = '';
+                appEl.classList.remove('ptr-active');
+            }
+            touchStartY = 0;
+            pullDistance = 0;
+        }, { passive: true });
+    },
 };
 
 function getStartOfWeek() {
@@ -4200,59 +4454,153 @@ Object.assign(App, {
         };
 
         try {
-            // 1. Try Google Books (Broader search)
-            let url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=20`;
-            let res = await fetch(url);
-            let data = await res.json();
-            let items = data.items || [];
+            // 1. Parallel Fetch from Google Books and Open Library for "Universal Library" experience
+            const [gbRes, olRes] = await Promise.allSettled([
+                fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&printType=books&maxResults=40`),
+                fetch(`https://openlibrary.org/search.json?q=${encodeURIComponent(query)}&limit=15`)
+            ]);
 
-            // 2. If no results, try normalized query
-            if (items.length === 0) {
-                const normQuery = normalize(query);
-                if (normQuery !== query) {
-                    res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(normQuery)}&maxResults=20`);
-                    data = await res.json();
-                    items = data.items || [];
+            let items = [];
+            const existingTitles = new Set();
+
+            // Handle Google Books results
+            if (gbRes.status === 'fulfilled') {
+                const gbData = await gbRes.value.json();
+                if (gbData.items) {
+                    gbData.items.forEach(item => {
+                        items.push(item);
+                        existingTitles.add((item.volumeInfo.title || '').toLowerCase());
+                    });
                 }
             }
 
-            // 3. If still no results, try Open Library
-            if (items.length === 0) {
-                try {
-                    const olRes = await fetch(`https://openlibrary.org/search.json?q=${encodeURIComponent(query)}&limit=10`);
-                    const olData = await olRes.json();
-                    if (olData.docs && olData.docs.length > 0) {
-                        items = olData.docs.map(doc => ({
-                            volumeInfo: {
-                                title: doc.title,
-                                authors: doc.author_name,
-                                publishedDate: doc.first_publish_year?.toString(),
-                                pageCount: doc.number_of_pages_median,
-                                categories: doc.subject,
-                                description: doc.first_sentence?.join(' '),
-                                imageLinks: doc.cover_i ? {
-                                    thumbnail: `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg`,
-                                    smallThumbnail: `https://covers.openlibrary.org/b/id/${doc.cover_i}-S.jpg`
-                                } : null
-                            }
-                        }));
-                    }
-                } catch (e) { console.warn('OpenLibrary fallback failed', e); }
+            // Handle Open Library results (as supplement)
+            if (olRes.status === 'fulfilled') {
+                const olData = await olRes.value.json();
+                if (olData.docs && olData.docs.length > 0) {
+                    olData.docs.forEach(doc => {
+                        const title = doc.title || '';
+                        if (!existingTitles.has(title.toLowerCase())) {
+                            items.push({
+                                volumeInfo: {
+                                    title: title,
+                                    authors: doc.author_name,
+                                    publishedDate: doc.first_publish_year?.toString(),
+                                    pageCount: doc.number_of_pages_median,
+                                    categories: doc.subject,
+                                    description: doc.first_sentence?.join(' '),
+                                    language: doc.language?.[0],
+                                    imageLinks: doc.cover_i ? {
+                                        thumbnail: `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg`,
+                                        smallThumbnail: `https://covers.openlibrary.org/b/id/${doc.cover_i}-S.jpg`
+                                    } : null
+                                }
+                            });
+                            existingTitles.add(title.toLowerCase());
+                        }
+                    });
+                }
             }
+
+            // 2. If results are still very few, try title-specific search
+            if (items.length < 3) {
+                const broadRes = await fetch(`https://www.googleapis.com/books/v1/volumes?q=intitle:${encodeURIComponent(query)}&printType=books&maxResults=10`);
+                const broadData = await broadRes.json();
+                if (broadData.items) {
+                    broadData.items.forEach(i => {
+                        const t = (i.volumeInfo.title || '').toLowerCase();
+                        if (!existingTitles.has(t)) {
+                            items.push(i);
+                            existingTitles.add(t);
+                        }
+                    });
+                }
+            }
+
+            items.sort((a, b) => {
+                const aInfo = a.volumeInfo || {};
+                const bInfo = b.volumeInfo || {};
+                const q = query.toLowerCase();
+                
+                // Helper to detect if a book is Turkish
+                const isTR = (info) => {
+                    const lang = (info.language || '').toLowerCase();
+                    return lang === 'tr' || lang === 'tur' || lang.includes('turkish');
+                };
+
+                // 1. EXACT Title Match (Highest Priority)
+                const aTitle = (aInfo.title || '').toLowerCase();
+                const bTitle = (bInfo.title || '').toLowerCase();
+                const aExact = aTitle === q ? 1 : 0;
+                const bExact = bTitle === q ? 1 : 0;
+                if (aExact !== bExact) return bExact - aExact;
+
+                // 2. Language Priority for Turkish Queries
+                const isTurkishQuery = /[ğüşıöçĞÜŞİÖÇ]/.test(query);
+                if (isTurkishQuery) {
+                    const aTR = isTR(aInfo) ? 1 : 0;
+                    const bTR = isTR(bInfo) ? 1 : 0;
+                    if (aTR !== bTR) return bTR - aTR;
+                }
+
+                // 3. Title Starts With / Includes Query
+                const aStarts = aTitle.startsWith(q) ? 1 : 0;
+                const bStarts = bTitle.startsWith(q) ? 1 : 0;
+                if (aStarts !== bStarts) return bStarts - aStarts;
+
+                const aIncl = aTitle.includes(q) ? 1 : 0;
+                const bIncl = bTitle.includes(q) ? 1 : 0;
+                if (aIncl !== bIncl) return bIncl - aIncl;
+
+                // 4. Title + Author Combined Match
+                const aCombined = (aInfo.title + ' ' + (aInfo.authors ? aInfo.authors.join(' ') : '')).toLowerCase();
+                const bCombined = (bInfo.title + ' ' + (bInfo.authors ? bInfo.authors.join(' ') : '')).toLowerCase();
+                const aMatch = aCombined.includes(q) ? 1 : 0;
+                const bMatch = bCombined.includes(q) ? 1 : 0;
+                if (aMatch !== bMatch) return bMatch - aMatch;
+
+                // 5. Popularity
+                const aRate = aInfo.ratingsCount || 0;
+                const bRate = bInfo.ratingsCount || 0;
+                if (Math.abs(aRate - bRate) > 10) return bRate - aRate;
+
+                return 0;
+            });
 
             if (items.length > 0) {
                 this._bookSearchResults = items.map(item => {
                     const info = item.volumeInfo || {};
                     let desc = info.description || '';
-                    if (typeof desc === 'object') desc = desc.value || ''; // Handle Google Books description object
+                    if (typeof desc === 'object') desc = desc.value || ''; 
                     
+                    let categories = info.categories || [];
+                    if (!Array.isArray(categories)) categories = [categories];
+                    
+                    const genreMap = {
+                        'fiction': 'Kurgu', 'drama': 'Dram', 'history': 'Tarih', 'biography': 'Biyografi',
+                        'fantasy': 'Fantastik', 'science fiction': 'Bilim Kurgu', 'horror': 'Korku',
+                        'romance': 'Romantik', 'mystery': 'Gizem', 'thriller': 'Gerilim',
+                        'adventure': 'Macera', 'crime': 'Suç', 'poetry': 'Şiir', 'philosophy': 'Felsefe',
+                        'psychology': 'Psikoloji', 'religion': 'Din', 'science': 'Bilim',
+                        'art': 'Sanat', 'cooking': 'Yemek', 'travel': 'Seyahat', 'self-help': 'Kişisel Gelişim'
+                    };
+
+                    let translatedGenres = categories.map(cat => {
+                        const lowCat = cat.toLowerCase();
+                        for (const [en, tr] of Object.entries(genreMap)) {
+                            if (lowCat.includes(en)) return tr;
+                        }
+                        return cat;
+                    });
+
                     return {
                         title: info.title || 'Bilinmiyor',
                         author: info.authors ? (Array.isArray(info.authors) ? info.authors.join(', ') : info.authors) : 'Bilinmiyor',
                         year: info.publishedDate ? info.publishedDate.split('-')[0] : '',
                         pages: info.pageCount || '',
-                        genre: info.categories ? (Array.isArray(info.categories) ? info.categories.slice(0, 2).join(', ') : info.categories) : '',
+                        genre: translatedGenres.slice(0, 2).join(', '),
                         note: desc,
+                        language: info.language,
                         cover: (info.imageLinks?.thumbnail || info.imageLinks?.smallThumbnail || '').replace('http://', 'https://').replace('zoom=1', 'zoom=2'),
                         coverThumb: (info.imageLinks?.thumbnail || info.imageLinks?.smallThumbnail || '').replace('http://', 'https://')
                     };
@@ -4304,58 +4652,19 @@ Object.assign(App, {
     },
 
     selectOpenLibraryItem(itemData) {
-        document.getElementById('bookFormTitle').value = itemData.title || '';
-        document.getElementById('bookFormAuthor').value = itemData.author || '';
-        document.getElementById('bookFormYear').value = itemData.year || '';
-        document.getElementById('bookFormPages').value = itemData.pages || '';
-        document.getElementById('bookFormGenre').value = itemData.genre || '';
-        document.getElementById('bookFormCover').value = itemData.cover || '';
-        if (itemData.note) document.getElementById('bookFormNote').value = itemData.note;
+        document.getElementById('formTitle').value = itemData.title || '';
+        document.getElementById('bookAuthor').value = itemData.author || '';
+        document.getElementById('formYear').value = itemData.year || '';
+        document.getElementById('bookPages').value = itemData.pages || '';
+        document.getElementById('formGenre').value = itemData.genre || '';
+        document.getElementById('formPoster').value = itemData.cover || '';
+        if (itemData.note) document.getElementById('formNote').value = itemData.note;
         document.getElementById('bookSearchResults').classList.add('hidden');
         this.showToast('✅ Kitap bilgileri dolduruldu!');
     },
 
-    saveBook() {
-        const title = document.getElementById('bookFormTitle').value.trim();
-        if (!title) return this.showToast('Kitap adı gerekli', true);
-
-        const isEdit = !!this._editingBookId;
-        if (!isEdit) {
-            const exists = this.state.books.some(b => b.title.toLowerCase() === title.toLowerCase());
-            if (exists) return this.showToast('Bu kitap zaten kütüphanende ekli!', true);
-        }
-
-        const bookData = {
-            title,
-            author: document.getElementById('bookFormAuthor').value.trim(),
-            year: document.getElementById('bookFormYear').value,
-            pages: parseInt(document.getElementById('bookFormPages').value) || 0,
-            genre: document.getElementById('bookFormGenre').value.trim(),
-            status: document.getElementById('bookFormStatus').value,
-            cover: document.getElementById('bookFormCover').value.trim(),
-            note: document.getElementById('bookFormNote').value.trim(),
-            updatedAt: Date.now()
-        };
-
-        if (isEdit) {
-            const idx = this.state.books.findIndex(b => b.id === this._editingBookId);
-            if (idx > -1) {
-                this.state.books[idx] = { ...this.state.books[idx], ...bookData };
-            }
-        } else {
-            bookData.id = Date.now().toString();
-            bookData.createdAt = Date.now();
-            bookData.rating = 0;
-            bookData.favorite = false;
-            this.state.books.push(bookData);
-        }
-
-        this.save();
-        this.closeModals();
-        this.renderAll();
-        this.showToast(isEdit ? 'Kitap güncellendi' : 'Kitap eklendi 📚');
-    },
-
+    // saveBook logic is now handled by saveForm.
+    
     openBookDetail(id) {
         const book = this.state.books.find(b => b.id === id);
         if (!book) return;
@@ -4392,15 +4701,26 @@ Object.assign(App, {
             ${book.note ? `<div class="detail-note">${book.note}</div>` : ''}
 
             <!-- Kitap Okuma Asistanı -->
-            <div class="widget stats-widget" style="margin-top:20px; background:rgba(168,85,247,0.1); border:1px solid var(--primary);">
-                <h4 style="margin-bottom:10px; font-size:14px; display:flex; align-items:center; gap:8px;">📚 Okuma Asistanı</h4>
-                <div style="font-size:13px; color:var(--text2); line-height:1.6;">
-                    ${book.pages ? `
+            <div class="widget stats-widget" style="margin-top:20px; background:rgba(168,85,247,0.1); border:1px solid var(--primary); padding: 15px; border-radius: 12px;">
+                <h4 style="margin-bottom:12px; font-size:14px; display:flex; align-items:center; gap:8px;">📚 Okuma Asistanı</h4>
+                
+                ${book.pages ? `
+                    <div style="margin-bottom: 15px;">
+                        <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--text2); margin-bottom:6px;">
+                            <span>İlerleme: <b>${book.currentPage || 0} / ${book.pages} Sayfa</b></span>
+                            <span style="color:var(--purple); font-weight:700;">%${Math.min(100, Math.round(((book.currentPage || 0) / book.pages) * 100))}</span>
+                        </div>
+                        <input type="range" min="0" max="${book.pages}" value="${book.currentPage || 0}" 
+                            class="book-slider" 
+                            oninput="App.updateBookDetailProgressUI(event, ${book.pages})"
+                            onchange="App.saveBookProgress('${book.id}', this.value, ${book.pages})">
+                    </div>
+                    <div style="font-size:12px; color:var(--text3); line-height:1.6; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 10px;">
                         Günde 
                         <input type="number" value="${this.state.dailyPageGoal || 20}" onchange="App.updateDailyGoal(this.value)" style="width:40px; background:var(--bg3); border:1px solid var(--border); color:var(--text); text-align:center; border-radius:4px; font-size:12px;"> 
-                        sayfa okursan, bu kitabı <b>${Math.ceil(book.pages / (this.state.dailyPageGoal || 20))} günde</b> bitirebilirsin.
-                    ` : 'Sayfa sayısı belirtilmemiş.'}
-                </div>
+                        sayfa okursan, bu kitabı <b>${Math.ceil((book.pages - (book.currentPage || 0)) / (this.state.dailyPageGoal || 20))} günde</b> bitirebilirsin.
+                    </div>
+                ` : '<div style="font-size:12px; color:var(--text3);">Sayfa sayısı belirtilmemiş.</div>'}
             </div>
         `;
 
@@ -4409,6 +4729,7 @@ Object.assign(App, {
         const favBtn = document.getElementById('bookFavoriteBtn');
         if (favBtn) favBtn.innerText = book.favorite ? '❤️ Favoriden Çıkar' : '🤍 Favori';
         document.getElementById('bookDetailModal').classList.add('open');
+        this.pushHistoryState();
     },
 
     quickRateBook(id, rating) {
@@ -4460,42 +4781,8 @@ Object.assign(App, {
     },
 
     bindSwipeEvents() {
-        const items = document.querySelectorAll('.swipe-item');
-        items.forEach(item => {
-            let startX = 0;
-            let currentX = 0;
-            const content = item.querySelector('.swipe-item-content');
-            const id = item.dataset.id;
-            const type = item.dataset.type;
-
-            item.addEventListener('touchstart', (e) => {
-                startX = e.touches[0].clientX;
-            }, {passive: true});
-
-            item.addEventListener('touchmove', (e) => {
-                currentX = e.touches[0].clientX - startX;
-                if (Math.abs(currentX) > 20) {
-                    content.style.transform = `translateX(${currentX}px)`;
-                    const left = item.querySelector('.swipe-action-left');
-                    const right = item.querySelector('.swipe-action-right');
-                    if (left && right) {
-                        left.style.opacity = currentX > 50 ? '1' : '0';
-                        right.style.opacity = currentX < -50 ? '1' : '0';
-                    }
-                }
-            }, {passive: true});
-
-            item.addEventListener('touchend', () => {
-                if (currentX > 100) {
-                    this.handleSwipeAction(id, type, 'left');
-                } else if (currentX < -100) {
-                    this.handleSwipeAction(id, type, 'right');
-                }
-                content.style.transform = 'translateX(0)';
-                item.querySelectorAll('.swipe-bg').forEach(bg => bg.style.opacity = '0');
-                currentX = 0;
-            });
-        });
+        // Swipe disabled to favor tab swiping
+        return;
     },
 
     handleSwipeAction(id, type, direction) {
@@ -4765,6 +5052,7 @@ Object.assign(App, {
             `).join('');
         }
         document.getElementById('avatarModal').classList.add('open');
+        this.pushHistoryState();
     },
 
     async selectAvatar(emoji) {
@@ -4794,8 +5082,59 @@ Object.assign(App, {
             console.error('Avatar update error:', e);
             this.showToast('Hata: Fotoğraf güncellenemedi', true);
         }
-    }
+    },
+    initTabSwipe() {
+        let startX = 0;
+        let startY = 0;
+        const main = document.body;
+        main.addEventListener('touchstart', (e) => {
+            startX = e.touches[0].clientX;
+            startY = e.touches[0].clientY;
+        }, {passive: true});
+        main.addEventListener('touchend', (e) => {
+            if (document.querySelector('.modal.open')) return;
+            const endX = e.changedTouches[0].clientX;
+            const endY = e.changedTouches[0].clientY;
+            const diffX = endX - startX;
+            const diffY = endY - startY;
+            if (Math.abs(diffX) > 80 && Math.abs(diffY) < 60) {
+                const tabs = ['dashboard', 'movies', 'series', 'books', 'social', 'profile'];
+                const currentTab = this.currentTab || 'dashboard';
+                let currentIndex = tabs.indexOf(currentTab);
+                if (diffX > 0 && currentIndex > 0) this.switchTab(tabs[currentIndex - 1]);
+                else if (diffX < 0 && currentIndex < tabs.length - 1) this.switchTab(tabs[currentIndex + 1]);
+            }
+        }, {passive: true});
+    },
 
+    initHistory() {
+        history.replaceState({ type: 'main' }, '');
+        window.addEventListener('popstate', (e) => {
+            this.handleBackAction(e.state);
+        });
+    },
+
+    pushHistoryState(type = 'modal') {
+        history.pushState({ type }, '');
+    },
+
+    handleBackAction(state) {
+        const openModals = document.querySelectorAll('.modal-overlay.open');
+        if (openModals.length > 0) {
+            this.closeModals(true, false);
+        } else if (this.currentTab !== 'dashboard') {
+            this.switchTab('dashboard');
+        } else {
+            if (this._backPressedOnce) {
+                // Let history pop normally
+            } else {
+                this._backPressedOnce = true;
+                this.showToast('Çıkmak için tekrar basın');
+                history.pushState({ type: 'main' }, '');
+                setTimeout(() => { this._backPressedOnce = false; }, 2000);
+            }
+        }
+    }
 });
 
 document.addEventListener('DOMContentLoaded', () => {
