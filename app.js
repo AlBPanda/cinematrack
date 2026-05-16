@@ -244,10 +244,10 @@ const App = {
             profileUserName.innerHTML = `${userRecord.name || this.currentUser} <span style="font-size:14px; opacity:0.8; font-weight:normal;">@${userRecord.handle}</span>`;
         }
 
-        // Easter Egg: 'deniz'
+        // Easter Egg: 'deniz' ve 'kermode'
         const denizThemeBtn = document.getElementById('themeDeniz');
         if (denizThemeBtn) {
-            denizThemeBtn.style.display = this.currentUser === 'deniz' ? 'flex' : 'none';
+            denizThemeBtn.style.display = ['deniz', 'kermode'].includes(this.currentUser) ? 'flex' : 'none';
         }
 
         // Sosyal sekme: sadece deniz ve kermode görebilir (easter egg)
@@ -425,7 +425,8 @@ const App = {
     },
 
     triggerDenizEasterEgg() {
-        document.getElementById('themeDeniz').style.display = 'flex';
+        const denizThemeBtn = document.getElementById('themeDeniz');
+        if (denizThemeBtn) denizThemeBtn.style.display = 'flex';
         
         const audio = new Audio('https://actions.google.com/sounds/v1/cartoon/magic_chime.ogg');
         audio.volume = 0.5;
@@ -477,6 +478,7 @@ const App = {
         }
         if (auth) await auth.signOut();
         this.currentUser = null;
+        this._sessionQuoteIndex = null;
         this.state = { movies: [], series: [], books: [], goal: 5, goalCurrent: 0, goalWeek: '', streak: 0, lastWatchDate: null, globalUsers: [], currentUserData: null, following: [], followers: [], followRequests: [], sentRequests: [], hiddenChats: [] };
         this.eventsBound = false;
         document.getElementById('app').classList.add('hidden');
@@ -731,7 +733,9 @@ const App = {
         document.getElementById('seriesDetailCloseBtn').addEventListener('click', () => this.closeModals());
 
         if(document.getElementById('shareCloseBtn')) document.getElementById('shareCloseBtn').addEventListener('click', () => this.closeModals());
-        if(document.getElementById('wrappedCloseBtn')) document.getElementById('wrappedCloseBtn').addEventListener('click', () => this.closeModals());
+        if(document.getElementById('wrappedCloseBtn')) document.getElementById('wrappedCloseBtn').addEventListener('click', () => {
+            document.getElementById('wrappedModal').classList.remove('open');
+        });
         if(document.getElementById('btnWrapped')) document.getElementById('btnWrapped').addEventListener('click', () => this.showWrapped());
         if(document.getElementById('allBadgesCloseBtn')) document.getElementById('allBadgesCloseBtn').addEventListener('click', () => this.closeModals());
         if(document.getElementById('btnAllBadges')) document.getElementById('btnAllBadges').addEventListener('click', () => {
@@ -1020,6 +1024,8 @@ const App = {
 
             // IMDb ID'yi sakla
             this.tempImdbId = extData.imdb_id || null;
+            if (type === 'tv') this.tempTmdbId = String(id);
+            else this.tempTmdbId = null;
 
             const title = type === 'movie' ? data.title : data.name;
             const dateField = type === 'movie' ? data.release_date : data.first_air_date;
@@ -1090,6 +1096,7 @@ const App = {
         document.getElementById('formGlobalRating').value = '';
         this.tempSeasonsData = null;
         this.tempImdbId = null;
+        this.tempTmdbId = null;
 
         document.getElementById('addModal').classList.add('open');
         this.pushHistoryState();
@@ -1115,7 +1122,7 @@ const App = {
         document.getElementById('formTitle').value = item.title;
         document.getElementById('formYear').value = item.year || '';
         document.getElementById('formGenre').value = item.genre || '';
-        document.getElementById('formPoster').value = item.poster || '';
+        document.getElementById('formPoster').value = item.poster || item.cover || '';
         document.getElementById('formNote').value = item.note || '';
         document.getElementById('formPlatform').value = item.platform || '';
 
@@ -1141,7 +1148,8 @@ const App = {
             document.getElementById('bookStatus').value = item.status || 'readlist';
         }
 
-        this.closeModals(false); // Close details modal without resetting edit state
+        // Directly close all modals without triggering history.back, then open edit modal
+        document.querySelectorAll('.modal-overlay').forEach(m => m.classList.remove('open'));
         document.getElementById('addModal').classList.add('open');
         this.pushHistoryState();
     },
@@ -1230,6 +1238,7 @@ const App = {
                 type: 'series',
                 status, seasons, episodes,
                 seasonsData: this.tempSeasonsData || (existing ? existing.seasonsData : null),
+                tmdbId: this.tempTmdbId || (existing ? existing.tmdbId : null) || null,
                 rating: existing ? existing.rating : 0
             };
 
@@ -1251,6 +1260,7 @@ const App = {
             }
             
             this.tempSeasonsData = null;
+            this.tempTmdbId = null;
         } else if (type === 'book') {
             const author = document.getElementById('bookAuthor').value.trim();
             const pages = parseInt(document.getElementById('bookPages').value) || 0;
@@ -1650,8 +1660,8 @@ const App = {
 
         const hsc = document.getElementById('headerSeriesCompleted');
         if (hsc) hsc.innerText = seriesCompleted;
-        const hsw = document.getElementById('headerSeriesWatching');
-        if (hsw) hsw.innerText = seriesWatching;
+        const hsw = document.getElementById('headerSeriesWatchlist');
+        if (hsw) hsw.innerText = (this.state.series || []).filter(s => s.status === 'watchlist').length;
 
         const hbr = document.getElementById('headerBooksRead');
         if (hbr) hbr.innerText = booksRead;
@@ -1850,11 +1860,19 @@ const App = {
             { t: "Kitapsız bir oda, ruhsuz bir vücut gibidir.", a: "Cicero" },
             { t: "Okumak, başka birinin kafasıyla düşünmektir.", a: "Arthur Schopenhauer" },
             { t: "Sinema, hayatın tüm sıkıcı kısımlarının ayıklandığı halidir.", a: "Alfred Hitchcock" },
-            { t: "Hayallerinizi küçümseyen insanlardan uzak durun.", a: "Mark Twain" }
+            { t: "Hayallerinizi küçümseyen insanlardan uzak durun.", a: "Mark Twain" },
+            { t: "Bir kitap, dünyayı değiştirmenin en sessiz yoludur.", a: "Pablo Neruda" },
+            { t: "Film izlemek, başkasının hayatında bir süreliğine yaşamaktır.", a: "Roger Ebert" },
+            { t: "En güzel yolculuklar, bir kitabın sayfaları arasında yapılanlardır.", a: "Voltaire" },
+            { t: "Sanat, gerçeği söylemenin yalan söyleme biçimidir.", a: "Pablo Picasso" },
+            { t: "Bir filmin sonu, yeni bir düşüncenin başlangıcıdır.", a: "Andrei Tarkovsky" }
         ];
-        
-        const day = new Date().getDate();
-        const quote = quotes[day % quotes.length];
+
+        // Her oturumda rastgele bir söz seç ve session boyunca sabitle
+        if (!this._sessionQuoteIndex) {
+            this._sessionQuoteIndex = Math.floor(Math.random() * quotes.length);
+        }
+        const quote = quotes[this._sessionQuoteIndex];
         
         const textEl = document.getElementById('quoteText');
         const authEl = document.getElementById('quoteAuthor');
@@ -2078,7 +2096,7 @@ const App = {
 
                 let statusTag = '';
                 if (s.status === 'watching') statusTag = '<span class="series-status-tag status-watching">İzleniyor</span>';
-                else if (s.status === 'completed') statusTag = '<span class="series-status-tag status-completed">Tamamlandı</span>';
+                else if (s.status === 'completed') statusTag = '<span class="series-status-tag status-completed">Bitti</span>';
                 else if (s.status === 'paused') statusTag = '<span class="series-status-tag status-paused">Durduruldu</span>';
                 else if (s.status === 'watchlist') statusTag = '<span class="series-status-tag status-watchlist">İzlenecek</span>';
 
@@ -2263,6 +2281,11 @@ const App = {
             </div>
             ${starsInteractive}
             ${s.note ? `<div class="detail-note">${s.note}</div>` : ''}
+            <div style="margin: 12px 0 4px;">
+                <button onclick="App.refreshSeriesFromTMDB('${s.id}')" style="width:100%; padding:10px; background:rgba(168,85,247,0.12); border:1px solid var(--primary); color:var(--primary); border-radius:10px; font-size:13px; font-weight:600; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px;">
+                    🔄 Sezon/Bölüm Verilerini TMDB'den Güncelle
+                </button>
+            </div>
             <div class="detail-seasons">
                 <h3>Bölümler</h3>
                 ${seasonsHtml}
@@ -2276,6 +2299,69 @@ const App = {
         }
         document.getElementById('seriesDetailModal').classList.add('open');
         this.pushHistoryState();
+    },
+
+
+    async refreshSeriesFromTMDB(seriesId) {
+        const idx = this.state.series.findIndex(s => s.id === seriesId);
+        if (idx === -1) return;
+        const s = this.state.series[idx];
+
+        this.showToast('🔄 TMDB\'den güncelleniyor...');
+
+        try {
+            let tmdbId = s.tmdbId || null;
+
+            if (!tmdbId) {
+                const searchRes = await fetch(`https://api.themoviedb.org/3/search/tv?api_key=${TMDB_API_KEY}&language=tr-TR&query=${encodeURIComponent(s.title)}`);
+                const searchData = await searchRes.json();
+                if (searchData.results && searchData.results.length > 0) {
+                    const match = searchData.results.find(r => r.name.toLowerCase() === s.title.toLowerCase()) || searchData.results[0];
+                    tmdbId = match.id;
+                }
+            }
+
+            if (!tmdbId) {
+                this.showToast('❌ TMDB\'de bulunamadı', true);
+                return;
+            }
+
+            const detailRes = await fetch(`https://api.themoviedb.org/3/tv/${tmdbId}?api_key=${TMDB_API_KEY}&language=tr-TR`);
+            const data = await detailRes.json();
+
+            const oldSeasons = s.seasons || 1;
+            const newSeasons = data.number_of_seasons || oldSeasons;
+            const newEpisodes = data.number_of_episodes || s.episodes;
+            const newPoster = data.poster_path ? `https://image.tmdb.org/t/p/w500${data.poster_path}` : s.poster;
+            const newSeasonsData = data.seasons
+                ? data.seasons.filter(season => season.season_number > 0)
+                               .map(season => ({ season: season.season_number, episodes: season.episode_count }))
+                : s.seasonsData;
+
+            this.state.series[idx] = {
+                ...s,
+                seasons: newSeasons,
+                episodes: newEpisodes,
+                poster: newPoster,
+                seasonsData: newSeasonsData,
+                tmdbId: String(tmdbId),
+                updatedAt: Date.now()
+            };
+
+            this.save();
+            this.renderAll();
+            this.openSeriesDetail(seriesId);
+
+            const addedSeasons = newSeasons - oldSeasons;
+            if (addedSeasons > 0) {
+                this.showToast(`✅ Güncellendi! +${addedSeasons} yeni sezon (${newSeasons} sezon, ${newEpisodes} bölüm)`);
+            } else {
+                this.showToast(`✅ Güncellendi! ${newSeasons} sezon, ${newEpisodes} bölüm`);
+            }
+        } catch (err) {
+            console.error('TMDB refresh error:', err);
+            this.showToast('❌ Güncelleme başarısız', true);
+        }
     },
 
     toggleEpisode(seriesId, epId, btn) {
@@ -5142,13 +5228,22 @@ Object.assign(App, {
     initTabSwipe() {
         let startX = 0;
         let startY = 0;
+        let startTarget = null;
         const main = document.body;
         main.addEventListener('touchstart', (e) => {
             startX = e.touches[0].clientX;
             startY = e.touches[0].clientY;
+            startTarget = e.target;
         }, {passive: true});
         main.addEventListener('touchend', (e) => {
             if (document.querySelector('.modal-overlay.open')) return;
+
+            // Filter bar, discover carousel veya yatay kaydırılabilir alanlardan başlayan swipe'ları yoksay
+            const scrollableParent = startTarget && startTarget.closest(
+                '.filter-bar, .discover-carousel, .tmdb-results, [style*="overflow-x"]'
+            );
+            if (scrollableParent) return;
+
             const endX = e.changedTouches[0].clientX;
             const endY = e.changedTouches[0].clientY;
             const diffX = endX - startX;
