@@ -391,6 +391,38 @@
         </button>
       </section>
 
+      <!-- Books Tab -->
+      <section class="tab-content" id="tab-books">
+        <header class="header" style="margin-bottom: 20px;">
+          <h1 class="header-title" style="font-size: 20px; font-weight:700;">📚 Kitaplığım</h1>
+          <p class="header-subtitle" style="font-size:13px; color:var(--text2); margin-top:4px;">Okuduğun ve okuyacağın kitapları takip et</p>
+        </header>
+        <div class="filter-bar">
+          <button class="filter-btn active" data-filter="all">Tümü</button>
+          <button class="filter-btn" data-filter="read">Okundu</button>
+          <button class="filter-btn" data-filter="reading">Okunuyor</button>
+          <button class="filter-btn" data-filter="readlist">Okunacak</button>
+        </div>
+        <div class="sort-bar" style="display: flex; gap: 8px;">
+          <select id="bookGenreFilter" class="sort-select" style="flex:1;">
+            <option value="all">Tüm Türler</option>
+          </select>
+          <select id="bookSort" class="sort-select" style="flex:1;">
+            <option value="added">Son Eklenen</option>
+            <option value="rating">Puana Göre</option>
+            <option value="title">Ada Göre</option>
+            <option value="year">Yıla Göre</option>
+          </select>
+        </div>
+        <div class="content-grid" id="bookGrid">
+          <div class="empty-state" id="bookEmpty">
+            <div class="empty-icon">📚</div>
+            <p>Henüz kitap eklenmedi</p>
+            <button class="btn-primary" id="addFirstBookBtn">Kitap Ekle</button>
+          </div>
+        </div>
+      </section>
+
       <!-- Social Tab -->
       <section class="tab-content" id="tab-social">
         <header class="header" style="margin-bottom: 20px;">
@@ -472,10 +504,15 @@
         <span>Diziler</span>
         <span class="nav-badge" id="seriesBadge"></span>
       </button>
-      <button class="nav-item" data-tab="social" id="navSocial">
+      <button class="nav-item" data-tab="social" id="navSocial" style="display:none;">
         <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
         <span>Sosyal</span>
         <span class="nav-badge" id="messageBadge" style="display:none; background:var(--red);"></span>
+      </button>
+      <button class="nav-item" data-tab="books" id="navBooks">
+        <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+        <span>Kitaplar</span>
+        <span class="nav-badge" id="bookBadge"></span>
       </button>
       <button class="nav-item" data-tab="profile" id="navProfile">
         <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
@@ -496,6 +533,7 @@
       <div class="type-selector" id="typeSelectorWrap">
         <button class="type-btn active" data-type="movie" id="typeMovieBtn">🎬 Film</button>
         <button class="type-btn" data-type="series" id="typeSeriesBtn">📺 Dizi</button>
+        <button class="type-btn" data-type="book" id="typeBookBtn">📚 Kitap</button>
       </div>
 
       <div class="modal-body">
@@ -584,6 +622,82 @@
       <div class="modal-footer">
         <button class="btn-ghost" id="modalCancelBtn">İptal</button>
         <button class="btn-primary" id="modalSaveBtn">Kaydet</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Book Add/Edit Modal -->
+  <div class="modal-overlay" id="bookModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="bookModalTitle">📚 Kitap Ekle</h2>
+        <button class="modal-close" id="bookModalCloseBtn">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="bookFormId" value="" />
+        <!-- Open Library Search -->
+        <div class="form-group" style="position: relative;">
+          <label>Kitap Adı * <small style="color:var(--text3); font-weight:normal;">(Yazarken otomatik aranır)</small></label>
+          <div class="tmdb-search-row">
+            <svg class="tmdb-search-icon" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+            <input type="text" id="bookFormTitle" placeholder="Kitap adı yazın..." autocomplete="off" />
+          </div>
+          <div id="bookSearchResults" class="tmdb-results hidden" style="position: absolute; top: 100%; left: 0; right: 0; z-index: 10; margin-top: 4px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 1px solid var(--purple);"></div>
+        </div>
+        <div class="form-group">
+          <label>Yazar</label>
+          <input type="text" id="bookFormAuthor" placeholder="Yazar adı..." autocomplete="off" />
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Yıl</label>
+            <input type="number" id="bookFormYear" placeholder="2024" min="1000" max="2030" />
+          </div>
+          <div class="form-group">
+            <label>Sayfa Sayısı</label>
+            <input type="number" id="bookFormPages" placeholder="300" min="1" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Tür</label>
+          <input type="text" id="bookFormGenre" placeholder="Roman, Bilim Kurgu..." />
+        </div>
+        <div class="form-group">
+          <label>Durum</label>
+          <select id="bookFormStatus">
+            <option value="readlist">Okunacak</option>
+            <option value="reading">Okunuyor</option>
+            <option value="read">Okundu</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Kapak URL (opsiyonel)</label>
+          <input type="url" id="bookFormCover" placeholder="https://..." />
+        </div>
+        <div class="form-group">
+          <label>Not / Konu</label>
+          <textarea id="bookFormNote" placeholder="Düşünceleriniz, konu..." rows="2"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-ghost" id="bookModalCancelBtn">İptal</button>
+        <button class="btn-primary" id="bookModalSaveBtn">Kaydet</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Book Detail Modal -->
+  <div class="modal-overlay" id="bookDetailModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="bookDetailTitle">Kitap Detayı</h2>
+        <button class="modal-close" id="bookDetailCloseBtn">✕</button>
+      </div>
+      <div class="modal-body" id="bookDetailBody"></div>
+      <div class="modal-footer" style="display:flex; gap:10px;">
+        <button class="btn-ghost" id="bookFavoriteBtn" style="flex:1; padding:0 8px; font-size:12px;">🤍 Favori</button>
+        <button class="btn-ghost" id="bookEditBtn" style="flex:1; padding:0 8px; font-size:12px;">✏️ Düzenle</button>
+        <button class="btn-danger" id="bookDeleteBtn" style="flex:1; padding:0 8px; font-size:12px;">🗑️ Sil</button>
       </div>
     </div>
   </div>

@@ -24,6 +24,7 @@ const App = {
     state: {
         movies: [],
         series: [],
+        books: [],
         goal: 5,
         goalCurrent: 0,
         goalWeek: '',
@@ -195,7 +196,7 @@ const App = {
     async logout() {
         if (auth) await auth.signOut();
         this.currentUser = null;
-        this.state = { movies: [], series: [], goal: 5, goalCurrent: 0, goalWeek: '', streak: 0, lastWatchDate: null, globalUsers: [], currentUserData: null, following: [], followers: [], followRequests: [], sentRequests: [], hiddenChats: [] };
+        this.state = { movies: [], series: [], books: [], goal: 5, goalCurrent: 0, goalWeek: '', streak: 0, lastWatchDate: null, globalUsers: [], currentUserData: null, following: [], followers: [], followRequests: [], sentRequests: [], hiddenChats: [] };
         this.eventsBound = false;
         document.getElementById('app').classList.add('hidden');
         document.getElementById('loginScreen').classList.remove('hidden');
@@ -239,6 +240,13 @@ const App = {
         if (denizThemeBtn) {
             denizThemeBtn.style.display = this.currentUser === 'deniz' ? 'flex' : 'none';
         }
+
+        // Sosyal sekme: sadece deniz ve kermode görebilir (easter egg)
+        const navSocial = document.getElementById('navSocial');
+        if (navSocial) {
+            const canSeeSocial = ['deniz', 'kermode'].includes(this.currentUser);
+            navSocial.style.display = canSeeSocial ? 'flex' : 'none';
+        }
         
         // Data Migration / Loading (localStorage – will move to Firestore in Step 2)
         if (!localStorage.getItem('cinetrack_migrated') && localStorage.getItem('cinetrack_movies')) {
@@ -275,6 +283,7 @@ const App = {
                     const d = dataSnap.data();
                     this.state.movies      = d.movies       || [];
                     this.state.series      = d.series       || [];
+                    this.state.books       = d.books        || [];
                     this.state.goal        = d.goal         || 5;
                     this.state.goalCurrent = d.goalCurrent  || 0;
                     this.state.goalWeek    = d.goalWeek     || getStartOfWeek();
@@ -291,6 +300,7 @@ const App = {
                     if (legacyMovies) {
                         this.state.movies      = JSON.parse(legacyMovies) || [];
                         this.state.series      = JSON.parse(localStorage.getItem(`cinetrack_${this.currentUser}_series`)) || [];
+                        this.state.books       = JSON.parse(localStorage.getItem(`cinetrack_${this.currentUser}_books`)) || [];
                         this.state.goal        = parseInt(localStorage.getItem(`cinetrack_${this.currentUser}_goal`)) || 5;
                         this.state.goalCurrent = parseInt(localStorage.getItem(`cinetrack_${this.currentUser}_goal_current`)) || 0;
                         this.state.goalWeek    = localStorage.getItem(`cinetrack_${this.currentUser}_goal_week`) || getStartOfWeek();
@@ -441,7 +451,7 @@ const App = {
         this._wpKnownMemberships = {};
         if (auth) await auth.signOut();
         this.currentUser = null;
-        this.state = { movies: [], series: [], goal: 5, goalCurrent: 0, goalWeek: '', streak: 0, lastWatchDate: null, globalUsers: [], currentUserData: null, following: [], followers: [], followRequests: [], sentRequests: [], hiddenChats: [] };
+        this.state = { movies: [], series: [], books: [], goal: 5, goalCurrent: 0, goalWeek: '', streak: 0, lastWatchDate: null, globalUsers: [], currentUserData: null, following: [], followers: [], followRequests: [], sentRequests: [], hiddenChats: [] };
         this.eventsBound = false;
         document.getElementById('app').classList.add('hidden');
         document.getElementById('loginScreen').classList.remove('hidden');
@@ -452,6 +462,7 @@ const App = {
         const payload = {
             movies: this.state.movies,
             series: this.state.series,
+            books: this.state.books || [],
             goal: this.state.goal,
             goalCurrent: this.state.goalCurrent,
             goalWeek: this.state.goalWeek,
@@ -562,6 +573,14 @@ const App = {
             btn.addEventListener('click', (e) => {
                 if (this.editingId) return; // Prevent changing type while editing
                 const type = e.currentTarget.dataset.type;
+
+                // Book type → open separate book modal
+                if (type === 'book') {
+                    this.closeModals();
+                    this.openBookModal();
+                    return;
+                }
+
                 document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('active'));
                 e.currentTarget.classList.add('active');
                 
@@ -722,6 +741,60 @@ const App = {
         const sgf = document.getElementById('seriesGenreFilter');
         if (sgf) sgf.addEventListener('change', () => this.renderSeries());
 
+        // Books
+        if (document.getElementById('addFirstBookBtn')) {
+            document.getElementById('addFirstBookBtn').addEventListener('click', () => this.openBookModal());
+        }
+        if (document.getElementById('bookModalCloseBtn')) {
+            document.getElementById('bookModalCloseBtn').addEventListener('click', () => this.closeModals());
+        }
+        if (document.getElementById('bookModalCancelBtn')) {
+            document.getElementById('bookModalCancelBtn').addEventListener('click', () => this.closeModals());
+        }
+        if (document.getElementById('bookModalSaveBtn')) {
+            document.getElementById('bookModalSaveBtn').addEventListener('click', () => this.saveBook());
+        }
+        if (document.getElementById('bookDetailCloseBtn')) {
+            document.getElementById('bookDetailCloseBtn').addEventListener('click', () => this.closeModals());
+        }
+        if (document.getElementById('bookDeleteBtn')) {
+            document.getElementById('bookDeleteBtn').addEventListener('click', () => this.deleteBook());
+        }
+        if (document.getElementById('bookFavoriteBtn')) {
+            document.getElementById('bookFavoriteBtn').addEventListener('click', () => this.toggleBookFavorite());
+        }
+        if (document.getElementById('bookEditBtn')) {
+            document.getElementById('bookEditBtn').addEventListener('click', () => this.openBookModal(true));
+        }
+        if (document.getElementById('bookSort')) {
+            document.getElementById('bookSort').addEventListener('change', () => this.renderBooks());
+        }
+        if (document.getElementById('bookGenreFilter')) {
+            document.getElementById('bookGenreFilter').addEventListener('change', () => this.renderBooks());
+        }
+        document.querySelectorAll('#tab-books .filter-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                document.querySelectorAll('#tab-books .filter-btn').forEach(b => b.classList.remove('active'));
+                e.target.classList.add('active');
+                this.renderBooks();
+            });
+        });
+
+        // Book title search (Open Library)
+        let bookSearchTimeout = null;
+        const bookTitleInput = document.getElementById('bookFormTitle');
+        if (bookTitleInput) {
+            bookTitleInput.addEventListener('input', (e) => {
+                clearTimeout(bookSearchTimeout);
+                const val = e.target.value.trim();
+                if (val.length < 2) {
+                    document.getElementById('bookSearchResults').classList.add('hidden');
+                    return;
+                }
+                bookSearchTimeout = setTimeout(() => this.searchOpenLibrary(val), 600);
+            });
+        }
+
         // Goal edit toggle
         const editBtn = document.getElementById('goalEditBtn');
         if (editBtn) {
@@ -753,6 +826,7 @@ const App = {
         if (tab === 'dashboard') this.renderDashboard();
         if (tab === 'movies') this.renderMovies();
         if (tab === 'series') this.renderSeries();
+        if (tab === 'books') this.renderBooks();
         if (tab === 'social') this.renderSocialTab();
         // Profile tab doesn't need specific render logic right now
     },
@@ -1129,6 +1203,7 @@ const App = {
         this.renderDashboard();
         this.renderMovies();
         this.renderSeries();
+        this.renderBooks();
         this.renderProfileStats();
     },
 
@@ -3798,6 +3873,326 @@ function checkGoalWeek() {
         App.state.goalWeek = currentWeek;
     }
 }
+
+// ==========================================
+// BOOKS MODULE
+// ==========================================
+
+Object.assign(App, {
+
+    _editingBookId: null,
+
+    openBookModal(editMode = false) {
+        this._editingBookId = editMode ? this._currentBookDetailId : null;
+        document.getElementById('bookModalTitle').innerText = editMode ? '✏️ Kitap Düzenle' : '📚 Kitap Ekle';
+        document.getElementById('bookSearchResults').classList.add('hidden');
+
+        if (editMode && this._editingBookId) {
+            const book = this.state.books.find(b => b.id === this._editingBookId);
+            if (book) {
+                document.getElementById('bookFormTitle').value = book.title || '';
+                document.getElementById('bookFormAuthor').value = book.author || '';
+                document.getElementById('bookFormYear').value = book.year || '';
+                document.getElementById('bookFormPages').value = book.pages || '';
+                document.getElementById('bookFormGenre').value = book.genre || '';
+                document.getElementById('bookFormStatus').value = book.status || 'readlist';
+                document.getElementById('bookFormCover').value = book.cover || '';
+                document.getElementById('bookFormNote').value = book.note || '';
+            }
+        } else {
+            document.getElementById('bookFormTitle').value = '';
+            document.getElementById('bookFormAuthor').value = '';
+            document.getElementById('bookFormYear').value = '';
+            document.getElementById('bookFormPages').value = '';
+            document.getElementById('bookFormGenre').value = '';
+            document.getElementById('bookFormStatus').value = 'readlist';
+            document.getElementById('bookFormCover').value = '';
+            document.getElementById('bookFormNote').value = '';
+        }
+
+        // Close detail modal if open
+        document.getElementById('bookDetailModal').classList.remove('open');
+        document.getElementById('bookModal').classList.add('open');
+    },
+
+    async searchOpenLibrary(query) {
+        const resultsContainer = document.getElementById('bookSearchResults');
+        resultsContainer.classList.remove('hidden');
+        resultsContainer.innerHTML = '<div class="tmdb-loading">Aranıyor...</div>';
+
+        try {
+            const res = await fetch(`https://openlibrary.org/search.json?q=${encodeURIComponent(query)}&limit=10&fields=key,title,author_name,first_publish_year,cover_i,number_of_pages_median,subject`);
+            const data = await res.json();
+
+            if (data.docs && data.docs.length > 0) {
+                resultsContainer.innerHTML = data.docs.map(item => {
+                    const title = item.title || 'Bilinmiyor';
+                    const author = item.author_name ? item.author_name[0] : 'Bilinmiyor';
+                    const year = item.first_publish_year || '';
+                    const coverId = item.cover_i;
+                    const cover = coverId ? `https://covers.openlibrary.org/b/id/${coverId}-S.jpg` : '';
+                    const pages = item.number_of_pages_median || '';
+
+                    return `
+                        <div class="tmdb-item" onclick="App.selectOpenLibraryItem(${JSON.stringify({
+                            title, author, year, pages,
+                            cover: coverId ? `https://covers.openlibrary.org/b/id/${coverId}-M.jpg` : '',
+                            genre: item.subject ? item.subject.slice(0,3).join(', ') : ''
+                        }).replace(/"/g, '&quot;')})">
+                            <div class="tmdb-poster">
+                                ${cover ? `<img src="${cover}" style="width:100%;height:100%;object-fit:cover;border-radius:6px;"/>` : '📚'}
+                            </div>
+                            <div class="tmdb-info">
+                                <div class="tmdb-title">${title}</div>
+                                <div class="tmdb-year">${author}${year ? ' · ' + year : ''}${pages ? ' · ' + pages + ' sf.' : ''}</div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } else {
+                resultsContainer.innerHTML = '<div class="tmdb-loading">Sonuç bulunamadı.</div>';
+            }
+        } catch (err) {
+            resultsContainer.innerHTML = '<div class="tmdb-loading">Arama başarısız.</div>';
+        }
+    },
+
+    selectOpenLibraryItem(itemData) {
+        document.getElementById('bookFormTitle').value = itemData.title || '';
+        document.getElementById('bookFormAuthor').value = itemData.author || '';
+        document.getElementById('bookFormYear').value = itemData.year || '';
+        document.getElementById('bookFormPages').value = itemData.pages || '';
+        document.getElementById('bookFormGenre').value = itemData.genre || '';
+        document.getElementById('bookFormCover').value = itemData.cover || '';
+        if (itemData.note) document.getElementById('bookFormNote').value = itemData.note;
+        document.getElementById('bookSearchResults').classList.add('hidden');
+        this.showToast('✅ Kitap bilgileri dolduruldu!');
+    },
+
+    saveBook() {
+        const title = document.getElementById('bookFormTitle').value.trim();
+        if (!title) return this.showToast('Kitap adı gerekli', true);
+
+        const isEdit = !!this._editingBookId;
+        if (!isEdit) {
+            const exists = this.state.books.some(b => b.title.toLowerCase() === title.toLowerCase());
+            if (exists) return this.showToast('Bu kitap zaten kütüphanende ekli!', true);
+        }
+
+        const bookData = {
+            title,
+            author: document.getElementById('bookFormAuthor').value.trim(),
+            year: document.getElementById('bookFormYear').value,
+            pages: parseInt(document.getElementById('bookFormPages').value) || 0,
+            genre: document.getElementById('bookFormGenre').value.trim(),
+            status: document.getElementById('bookFormStatus').value,
+            cover: document.getElementById('bookFormCover').value.trim(),
+            note: document.getElementById('bookFormNote').value.trim(),
+            updatedAt: Date.now()
+        };
+
+        if (isEdit) {
+            const idx = this.state.books.findIndex(b => b.id === this._editingBookId);
+            if (idx > -1) {
+                this.state.books[idx] = { ...this.state.books[idx], ...bookData };
+            }
+        } else {
+            bookData.id = Date.now().toString();
+            bookData.createdAt = Date.now();
+            bookData.rating = 0;
+            bookData.favorite = false;
+            this.state.books.push(bookData);
+        }
+
+        this.save();
+        this.closeModals();
+        this.renderAll();
+        this.showToast(isEdit ? 'Kitap güncellendi' : 'Kitap eklendi 📚');
+    },
+
+    openBookDetail(id) {
+        const book = this.state.books.find(b => b.id === id);
+        if (!book) return;
+
+        this._currentBookDetailId = id;
+
+        let starsHtml = `<div class="interactive-stars" style="margin-top:10px; display:flex; align-items:center; justify-content:center; gap:4px;">`;
+        for (let i = 1; i <= 10; i++) {
+            starsHtml += `<span style="font-size:28px; cursor:pointer; transition:0.2s; color:${i <= (book.rating || 0) ? this.getRatingColor(book.rating) : 'var(--bg3)'}" onclick="App.quickRateBook('${book.id}', ${i})">★</span>`;
+        }
+        starsHtml += `</div>`;
+
+        const statusLabels = { read: 'Okundu', reading: 'Okunuyor', readlist: 'Okunacak' };
+        const statusColors = { read: 'var(--green)', reading: 'var(--primary)', readlist: 'var(--amber)' };
+
+        const body = `
+            ${book.cover ? `<div class="detail-poster"><img src="${book.cover}" /></div>` : ''}
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <h3 class="detail-title" style="margin:0;">${book.title}</h3>
+                <select class="detail-status-select" onchange="App.quickBookStatus('${book.id}', this.value)">
+                    <option value="readlist" ${book.status === 'readlist' ? 'selected' : ''}>Okunacak</option>
+                    <option value="reading" ${book.status === 'reading' ? 'selected' : ''}>Okunuyor</option>
+                    <option value="read" ${book.status === 'read' ? 'selected' : ''}>Okundu</option>
+                </select>
+            </div>
+            ${book.author ? `<div style="font-size:13px; color:var(--text2); margin-bottom:8px;">✍️ ${book.author}</div>` : ''}
+            <div class="detail-tags">
+                ${book.year ? `<span class="detail-tag">${book.year}</span>` : ''}
+                ${book.pages ? `<span class="detail-tag">${book.pages} sayfa</span>` : ''}
+                ${book.genre ? `<span class="detail-tag">${book.genre}</span>` : ''}
+            </div>
+            ${starsHtml}
+            ${book.note ? `<div class="detail-note">${book.note}</div>` : ''}
+        `;
+
+        document.getElementById('bookDetailBody').innerHTML = body;
+        document.getElementById('bookDetailTitle').innerText = book.title;
+        const favBtn = document.getElementById('bookFavoriteBtn');
+        if (favBtn) favBtn.innerText = book.favorite ? '❤️ Favoriden Çıkar' : '🤍 Favori';
+        document.getElementById('bookDetailModal').classList.add('open');
+    },
+
+    quickRateBook(id, rating) {
+        const idx = this.state.books.findIndex(b => b.id === id);
+        if (idx > -1) {
+            this.state.books[idx].rating = rating;
+            this.save();
+            this.renderBooks();
+            this.openBookDetail(id);
+        }
+    },
+
+    quickBookStatus(id, status) {
+        const idx = this.state.books.findIndex(b => b.id === id);
+        if (idx > -1) {
+            this.state.books[idx].status = status;
+            this.save();
+            this.renderBooks();
+            this.showToast('Durum güncellendi');
+        }
+    },
+
+    deleteBook() {
+        if (!this._currentBookDetailId) return;
+        if (!confirm('Bu kitabı silmek istediğine emin misin?')) return;
+        this.state.books = this.state.books.filter(b => b.id !== this._currentBookDetailId);
+        this.save();
+        this.closeModals();
+        this.renderAll();
+        this.showToast('Kitap silindi');
+    },
+
+    toggleBookFavorite() {
+        const book = this.state.books.find(b => b.id === this._currentBookDetailId);
+        if (book) {
+            book.favorite = !book.favorite;
+            this.save();
+            this.showToast(book.favorite ? 'Favorilere eklendi' : 'Favorilerden çıkarıldı');
+            const favBtn = document.getElementById('bookFavoriteBtn');
+            if (favBtn) favBtn.innerText = book.favorite ? '❤️ Favoriden Çıkar' : '🤍 Favori';
+            this.renderBooks();
+        }
+    },
+
+    renderBooks() {
+        const grid = document.getElementById('bookGrid');
+        if (!grid) return;
+
+        const filterBtn = document.querySelector('#tab-books .filter-btn.active');
+        const filter = filterBtn ? filterBtn.dataset.filter : 'all';
+        const sort = document.getElementById('bookSort') ? document.getElementById('bookSort').value : 'added';
+        const genreFilter = document.getElementById('bookGenreFilter') ? document.getElementById('bookGenreFilter').value : 'all';
+
+        let filtered = (this.state.books || []).filter(b => {
+            if (filter !== 'all' && b.status !== filter) return false;
+            if (genreFilter !== 'all' && (!b.genre || !b.genre.split(',').map(g => g.trim()).includes(genreFilter))) return false;
+            return true;
+        });
+
+        filtered.sort((a, b) => {
+            if (sort === 'added') return (b.createdAt || 0) - (a.createdAt || 0);
+            if (sort === 'rating') return (b.rating || 0) - (a.rating || 0);
+            if (sort === 'title') return a.title.localeCompare(b.title, 'tr');
+            if (sort === 'year') return (parseInt(b.year) || 0) - (parseInt(a.year) || 0);
+            return 0;
+        });
+
+        // Update genre dropdown
+        const bookGenres = new Set();
+        (this.state.books || []).forEach(b => {
+            if (b.genre) b.genre.split(',').forEach(g => bookGenres.add(g.trim()));
+        });
+        const gSelect = document.getElementById('bookGenreFilter');
+        if (gSelect) {
+            const curVal = gSelect.value;
+            gSelect.innerHTML = `<option value="all">Tüm Türler</option>` +
+                Array.from(bookGenres).sort().map(g => `<option value="${g}">${g}</option>`).join('');
+            if (Array.from(bookGenres).includes(curVal)) gSelect.value = curVal;
+        }
+
+        // Update book badge
+        const readlistCount = (this.state.books || []).filter(b => b.status === 'readlist').length;
+        const badge = document.getElementById('bookBadge');
+        if (badge) badge.innerText = readlistCount > 0 ? readlistCount : '';
+
+        if (filtered.length === 0) {
+            if ((this.state.books || []).length === 0 && filter === 'all') {
+                grid.innerHTML = `
+                <div class="empty-state" id="bookEmpty">
+                    <div class="empty-icon">📚</div>
+                    <p>Henüz kitap eklenmedi</p>
+                    <button class="btn-primary" id="addFirstBookBtn2">Kitap Ekle</button>
+                </div>`;
+                const btn2 = document.getElementById('addFirstBookBtn2');
+                if (btn2) btn2.addEventListener('click', () => this.openBookModal());
+            } else {
+                grid.innerHTML = '<div class="empty-state"><p>Sonuç bulunamadı</p></div>';
+            }
+            grid.style.display = 'block';
+            return;
+        }
+
+        grid.style.display = 'grid';
+        grid.innerHTML = filtered.map(book => {
+            let badge = '';
+            if (book.status === 'read') badge = '<div class="movie-status-badge badge-watched">Okundu</div>';
+            else if (book.status === 'readlist') badge = '<div class="movie-status-badge badge-watchlist">Okunacak</div>';
+            else if (book.status === 'reading') badge = '<div class="movie-status-badge badge-watching">Okunuyor</div>';
+
+            const starColor = this.getRatingColor(book.rating);
+            const starHtml = book.rating ? `<div class="movie-rating" style="color:${starColor}">${'★'.repeat(book.rating)}<span style="color:var(--bg3)">${'★'.repeat(10 - book.rating)}</span></div>` : '';
+
+            return `
+            <div class="movie-card" onclick="App.openBookDetail('${book.id}')">
+                <div class="movie-poster">
+                    ${book.cover ? `<img src="${book.cover}" loading="lazy" onerror="this.outerHTML='<div class=\\'movie-poster-placeholder\\'>📚</div>'" />` : `<div class="movie-poster-placeholder">📚</div>`}
+                    ${badge}
+                </div>
+                <div class="movie-info">
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom:2px;">
+                        <div class="movie-title" style="margin-bottom:0;">${book.title}</div>
+                        <div onclick="event.stopPropagation(); App.toggleBookFavGrid('${book.id}')" style="font-size:16px; cursor:pointer; transition:transform 0.2s;" onmouseover="this.style.transform='scale(1.2)'" onmouseout="this.style.transform='scale(1)'">
+                            ${book.favorite ? '❤️' : '🤍'}
+                        </div>
+                    </div>
+                    <div class="movie-year">${book.author || ''}${book.year ? ' · ' + book.year : ''}${book.pages ? ' · ' + book.pages + 'sf.' : ''}</div>
+                    ${starHtml}
+                </div>
+            </div>`;
+        }).join('');
+    },
+
+    toggleBookFavGrid(id) {
+        const book = this.state.books.find(b => b.id === id);
+        if (book) {
+            book.favorite = !book.favorite;
+            this.save();
+            this.renderBooks();
+            this.showToast(book.favorite ? 'Favorilere eklendi' : 'Favorilerden çıkarıldı');
+        }
+    }
+
+});
 
 document.addEventListener('DOMContentLoaded', () => {
     App.init();
