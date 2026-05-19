@@ -514,18 +514,30 @@
           <div id="followRequestsList" style="display:flex; flex-direction:column; gap:8px;"></div>
         </div>
 
-        <!-- User Search -->
-        <div style="margin-bottom: 20px;">
-          <div class="search-bar" style="margin-bottom: 10px;">
-            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
-            <input type="text" id="socialSearchInput" placeholder="İsim veya @handle ara..." autocomplete="off" />
+        <!-- Friend Add Section -->
+        <div class="widget stats-widget" style="margin-bottom: 20px; background: var(--bg2); border: 1px solid var(--border); border-radius: 16px; padding: 18px;">
+          <div style="margin-bottom: 16px;">
+            <h3 style="font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; display: flex; align-items: center; gap: 6px;">
+              🔑 Arkadaşlık Kodun
+            </h3>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <div id="myFriendCodeDisplay" style="flex: 1; background: var(--bg3); border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px; font-family: 'Outfit', 'Courier New', monospace; font-weight: 700; letter-spacing: 1px; color: var(--primary); font-size: 15px; text-shadow: 0 0 8px rgba(168, 85, 247, 0.2);">Yükleniyor...</div>
+              <button onclick="App.copyFriendCode()" style="padding: 10px 16px; border-radius: 12px; background: var(--bg3); border: 1px solid var(--border); color: var(--text); font-size: 13px; font-weight: 700; cursor: pointer; transition: all 0.2s;" onmouseenter="this.style.background='var(--border)'" onmouseleave="this.style.background='var(--bg3)'">Kopyala</button>
+            </div>
           </div>
-          <!-- Search Results -->
-          <div id="userSearchResults" style="display:none; background:var(--bg2); border:1px solid var(--border); border-radius:12px; overflow:hidden; margin-bottom:12px;"></div>
+          <div>
+            <h3 style="font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; display: flex; align-items: center; gap: 6px;">
+              🤝 Arkadaş Ekle
+            </h3>
+            <div style="display: flex; gap: 8px;">
+              <input type="text" id="friendCodeInput" placeholder="Arkadaşının kodunu gir (Örn: CT-A1B2C3)" style="flex: 1; background: var(--bg3); border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px; color: var(--text); font-size: 13px; outline: none; transition: border-color 0.2s;" onfocus="this.style.borderColor='var(--primary)'" onblur="this.style.borderColor='var(--border)'" autocomplete="off" />
+              <button onclick="App.addFriendByCode()" style="padding: 10px 20px; border-radius: 12px; background: var(--primary); border: none; color: white; font-size: 13px; font-weight: 700; cursor: pointer; transition: all 0.2s;" onmouseenter="this.style.transform='translateY(-1px)'" onmouseleave="this.style.transform='translateY(0)'">Ekle</button>
+            </div>
+          </div>
         </div>
 
         <!-- Watch Party Widget -->
-        <div class="widget stats-widget" style="margin-bottom: 20px; background: linear-gradient(135deg, rgba(168,85,247,0.08), rgba(59,130,246,0.08)); border: 1px solid rgba(168,85,247,0.2);">
+        <div class="widget stats-widget" id="watchPartyWidget" style="margin-bottom: 20px; background: linear-gradient(135deg, rgba(168,85,247,0.08), rgba(59,130,246,0.08)); border: 1px solid rgba(168,85,247,0.2);">
           <h3 class="widget-title" style="display:flex; align-items:center; gap:8px; font-size:13px;">
             🍿 Ortak İzleme Odaları
           </h3>
@@ -544,7 +556,7 @@
           <div id="conversationsList">
             <div class="empty-widget" style="text-align:center; color:var(--text3); padding:32px 16px;">
               <div style="font-size:36px; margin-bottom:8px;">💬</div>
-              <div>Henüz sohbet yok. Yukarıdan birini ara!</div>
+              <div>Henüz sohbet yok. Arkadaş ekleyerek sohbete başlayabilirsin!</div>
             </div>
           </div>
         </div>
@@ -603,7 +615,7 @@
         <span>Kitaplar</span>
         <span class="nav-badge" id="bookBadge"></span>
       </button>
-      <button class="nav-item" data-tab="social" id="navSocial" style="display:none;">
+      <button class="nav-item" data-tab="social" id="navSocial">
         <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
         <span>Sosyal</span>
         <span class="nav-badge" id="messageBadge" style="display:none; background:var(--red);"></span>
@@ -755,6 +767,7 @@
       <div class="modal-body" id="bookDetailBody"></div>
       <div class="modal-footer" style="display:flex; gap:10px;">
         <button class="btn-ghost" id="bookFavoriteBtn" style="flex:1; padding:0 8px; font-size:12px;">🤍 Favori</button>
+        <button class="btn-ghost" id="bookShareBtn" style="flex:1; padding:0 8px; font-size:12px;">📸 Paylaş</button>
         <button class="btn-ghost" id="bookEditBtn" style="flex:1; padding:0 8px; font-size:12px;">✏️ Düzenle</button>
         <button class="btn-danger" id="bookDeleteBtn" style="flex:1; padding:0 8px; font-size:12px;">🗑️ Sil</button>
       </div>
@@ -771,6 +784,7 @@
       <div class="modal-body" id="seriesDetailBody"></div>
       <div class="modal-footer" style="display:flex; gap:10px;">
         <button class="btn-ghost" id="seriesFavoriteBtn" style="flex:1;">🤍 Favoriye Ekle</button>
+        <button class="btn-ghost" id="seriesShareBtn" style="flex:1;">📸 Paylaş</button>
         <button class="btn-danger" id="seriesDetailDeleteBtn" style="flex:1;">🗑️ Sil</button>
       </div>
     </div>
@@ -810,6 +824,14 @@
           </div>
         </div>
         <p style="text-align:center; font-size:12px; color:var(--text3);">Bu kartın ekran görüntüsünü alıp sosyal medyada paylaşabilirsin!</p>
+        
+        <!-- Direct Share to Friend -->
+        <div style="margin-top:20px; border-top:1px solid var(--border); padding-top:16px;">
+          <h4 style="font-size:13px; font-weight:700; color:var(--text); margin-bottom:10px; display:flex; align-items:center; gap:6px;">
+            📨 Sohbette Arkadaşına Gönder
+          </h4>
+          <div id="shareFriendsList" style="display:flex; gap:12px; overflow-x:auto; padding-bottom:8px; width:100%; -webkit-overflow-scrolling:touch;"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -897,7 +919,7 @@
   <div class="modal-overlay" id="chatModal" style="z-index: 2000;">
     <div class="modal" style="height: 80vh; max-height: 800px; display:flex; flex-direction:column; padding:0;">
       <div class="modal-header" style="border-bottom: 1px solid var(--border); padding: 16px; background: var(--bg2); border-radius: 16px 16px 0 0;">
-        <div style="display:flex; align-items:center; gap: 12px;">
+        <div style="display:flex; align-items:center; gap: 12px; cursor:pointer;" onclick="App.closeModals(); App.openOtherProfile(App.currentChatHandle);">
           <div id="chatHeaderAvatar" style="font-size:24px;">👨</div>
           <div>
             <h2 id="chatHeaderName" style="margin:0; font-size:16px;">İsim</h2>
@@ -911,11 +933,22 @@
         <!-- Messages injected here -->
       </div>
       
-      <div class="modal-footer" style="padding: 12px 16px; border-top: 1px solid var(--border); background: var(--bg2); border-radius: 0 0 16px 16px; display:flex; gap:12px; align-items:center;">
-        <input type="text" id="chatInput" class="chat-input" placeholder="Mesaj yaz..." autocomplete="off" />
-        <button class="chat-send-btn" id="chatSendBtn">
-          <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="margin-right:2px; margin-top:2px;"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-        </button>
+      <div class="modal-footer" style="padding: 12px 16px; border-top: 1px solid var(--border); background: var(--bg2); border-radius: 0 0 16px 16px; display:flex; flex-direction:column; gap:8px;">
+        <div id="chatEmojiRow" style="display:flex; gap:8px; width:100%; overflow-x:auto; padding-bottom:4px; border-bottom:1px solid rgba(255,255,255,0.05); scrollbar-width: none;">
+          <span class="chat-quick-emoji" onclick="App.insertChatEmoji('🍿')" style="font-size:18px; cursor:pointer; padding:4px 8px; background:var(--bg3); border-radius:8px; border:1px solid var(--border); transition: transform 0.1s;" onmouseenter="this.style.transform='scale(1.15)'" onmouseleave="this.style.transform='scale(1)'">🍿</span>
+          <span class="chat-quick-emoji" onclick="App.insertChatEmoji('🎬')" style="font-size:18px; cursor:pointer; padding:4px 8px; background:var(--bg3); border-radius:8px; border:1px solid var(--border); transition: transform 0.1s;" onmouseenter="this.style.transform='scale(1.15)'" onmouseleave="this.style.transform='scale(1)'">🎬</span>
+          <span class="chat-quick-emoji" onclick="App.insertChatEmoji('❤️')" style="font-size:18px; cursor:pointer; padding:4px 8px; background:var(--bg3); border-radius:8px; border:1px solid var(--border); transition: transform 0.1s;" onmouseenter="this.style.transform='scale(1.15)'" onmouseleave="this.style.transform='scale(1)'">❤️</span>
+          <span class="chat-quick-emoji" onclick="App.insertChatEmoji('😂')" style="font-size:18px; cursor:pointer; padding:4px 8px; background:var(--bg3); border-radius:8px; border:1px solid var(--border); transition: transform 0.1s;" onmouseenter="this.style.transform='scale(1.15)'" onmouseleave="this.style.transform='scale(1)'">😂</span>
+          <span class="chat-quick-emoji" onclick="App.insertChatEmoji('🔥')" style="font-size:18px; cursor:pointer; padding:4px 8px; background:var(--bg3); border-radius:8px; border:1px solid var(--border); transition: transform 0.1s;" onmouseenter="this.style.transform='scale(1.15)'" onmouseleave="this.style.transform='scale(1)'">🔥</span>
+          <span class="chat-quick-emoji" onclick="App.insertChatEmoji('👍')" style="font-size:18px; cursor:pointer; padding:4px 8px; background:var(--bg3); border-radius:8px; border:1px solid var(--border); transition: transform 0.1s;" onmouseenter="this.style.transform='scale(1.15)'" onmouseleave="this.style.transform='scale(1)'">👍</span>
+          <span class="chat-quick-emoji" onclick="App.insertChatEmoji('👋')" style="font-size:18px; cursor:pointer; padding:4px 8px; background:var(--bg3); border-radius:8px; border:1px solid var(--border); transition: transform 0.1s;" onmouseenter="this.style.transform='scale(1.15)'" onmouseleave="this.style.transform='scale(1)'">👋</span>
+        </div>
+        <div style="display:flex; gap:12px; align-items:center; width:100%;">
+          <input type="text" id="chatInput" class="chat-input" placeholder="Mesaj yaz..." autocomplete="off" />
+          <button class="chat-send-btn" id="chatSendBtn">
+            <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="margin-right:2px; margin-top:2px;"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -947,89 +980,57 @@
         </div>
         <div style="display:flex; gap:6px; align-items:center;">
           <button id="wpFullscreenBtn" title="Tam Ekran" onclick="App._wpToggleFullscreen()" style="background:var(--bg3); border:1px solid var(--border); color:var(--text2); border-radius:8px; padding:5px 9px; cursor:pointer; font-size:13px;" title="Tam Ekran">⛶</button>
-          <button id="wpClosePartyBtn" title="Odadan Çık" style="background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.3); color:var(--red); border-radius:8px; padding:5px 10px; cursor:pointer; font-size:11px; font-weight:700;">🚪 Çıkış</button>
-          <button class="modal-close" id="watchPartyCloseBtn" style="position:static;">✕</button>
+          <button id="wpClosePartyBtn" onclick="App.closeWatchParty()" title="Odadan Çık" style="background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.3); color:var(--red); border-radius:8px; padding:5px 10px; cursor:pointer; font-size:11px; font-weight:700;">🚪 Çıkış</button>
+          <button class="modal-close" id="watchPartyCloseBtn" onclick="App.closeWatchParty()" style="position:static;">✕</button>
         </div>
       </div>
 
-      <!-- Seçili İçerik + Oynatıcı -->
-      <div class="wp-content-section" style="overflow-y:auto; max-height:340px;">
-        <div id="wpContentArea" style="padding:12px 16px;">
-          <div style="text-align:center; color:var(--text3); font-size:13px; padding:16px 0;">⏳ Yükleniyor...</div>
-        </div>
-      </div>
-
-      <!-- Oynatıcı Kontrolleri -->
-      <div class="wp-player-section">
-        <div class="wp-timer-display">
-          <span id="watchTimer" style="font-family:monospace; font-size:22px; font-weight:800; letter-spacing:2px; color:var(--text);">00:00</span>
-        </div>
-
-        <!-- Host Kontrolleri -->
-        <div id="wpHostControls" class="wp-host-controls" style="display:none; flex-direction:column; gap:10px;">
-          <!-- Ana oynat/duraklat butonu -->
-          <div style="display:flex; align-items:center; justify-content:center; gap:12px;">
-            <!-- 15sn geri -->
-            <button onclick="App._wpSeek(-15)" title="-15 saniye" style="background:var(--bg3); border:1px solid var(--border); border-radius:50%; width:36px; height:36px; color:var(--text); cursor:pointer; font-size:13px; display:flex; align-items:center; justify-content:center;">
-              <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M12.5 3a9 9 0 1 0 9 9h-2a7 7 0 1 1-7-7V7l-4-4 4-4v2.05c.17.01.33.05.5.07z"/><text x="7" y="17" font-size="6" fill="currentColor" font-weight="bold">15</text></svg>
-            </button>
-            <button id="wpPlayBtn" class="wp-play-btn" title="Oynat / Duraklat">
-              <svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><polygon points="5,3 19,12 5,21"/></svg>
-            </button>
-            <!-- 15sn ileri -->
-            <button onclick="App._wpSeek(15)" title="+15 saniye" style="background:var(--bg3); border:1px solid var(--border); border-radius:50%; width:36px; height:36px; color:var(--text); cursor:pointer; font-size:13px; display:flex; align-items:center; justify-content:center;">
-              <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M11.5 3v2.05c.17-.02.33-.06.5-.07l4 4-4 4V11a7 7 0 1 1-7 7h-2a9 9 0 1 0 9-9z"/><text x="7" y="17" font-size="6" fill="currentColor" font-weight="bold">15</text></svg>
-            </button>
+      <!-- Main Body Container -->
+      <div class="wp-body-container">
+        <!-- Sol Bölüm: Oynatıcı ve Kontroller -->
+        <div class="wp-left-side">
+          <div id="wpContentArea" style="width:100%;">
+            <div style="text-align:center; color:var(--text3); font-size:13px; padding:16px 0;">⏳ Yükleniyor...</div>
           </div>
 
-          <!-- Seek (ilerleme) slider -->
-          <div style="padding: 0 4px;">
-            <input type="range" id="wpSeekSlider" min="0" max="7200" value="0" step="1"
-              style="width:100%; accent-color:var(--primary); cursor:pointer; height:4px;"
-              oninput="App._wpSeekSliderInput(this.value)"
-              onchange="App._wpSeekSliderCommit(this.value)" />
-          </div>
-
-          <!-- Hız + Altyazı -->
-          <div style="display:flex; align-items:center; justify-content:center; gap:8px; flex-wrap:wrap;">
-            <span style="font-size:11px; color:var(--text3);">Hız:</span>
-            <div id="wpSpeedBtns" style="display:flex; gap:4px;">
-              <button onclick="App._wpSetSpeed(0.5)" data-speed="0.5" style="padding:3px 7px; border-radius:6px; border:1px solid var(--border); background:var(--bg3); color:var(--text2); font-size:11px; cursor:pointer;">0.5x</button>
-              <button onclick="App._wpSetSpeed(0.75)" data-speed="0.75" style="padding:3px 7px; border-radius:6px; border:1px solid var(--border); background:var(--bg3); color:var(--text2); font-size:11px; cursor:pointer;">0.75x</button>
-              <button onclick="App._wpSetSpeed(1)" data-speed="1" style="padding:3px 7px; border-radius:6px; border:1px solid var(--border); background:var(--primary); color:white; font-size:11px; cursor:pointer; font-weight:700;">1x</button>
-              <button onclick="App._wpSetSpeed(1.25)" data-speed="1.25" style="padding:3px 7px; border-radius:6px; border:1px solid var(--border); background:var(--bg3); color:var(--text2); font-size:11px; cursor:pointer;">1.25x</button>
-              <button onclick="App._wpSetSpeed(1.5)" data-speed="1.5" style="padding:3px 7px; border-radius:6px; border:1px solid var(--border); background:var(--bg3); color:var(--text2); font-size:11px; cursor:pointer;">1.5x</button>
-              <button onclick="App._wpSetSpeed(2)" data-speed="2" style="padding:3px 7px; border-radius:6px; border:1px solid var(--border); background:var(--bg3); color:var(--text2); font-size:11px; cursor:pointer;">2x</button>
+          <!-- Oynatıcı Kontrolleri (Gizlendi - Oynatma iframe içi kontrollerden yönetilir) -->
+          <div class="wp-player-section" style="width:100%; border:none; padding:0; background:none; display:none !important;">
+            <div class="wp-timer-display">
+              <span id="watchTimer" style="font-family:monospace; font-size:22px; font-weight:800; letter-spacing:2px; color:var(--text);">00:00</span>
             </div>
-            <button id="wpSubtitleBtn" onclick="App._wpToggleSubtitles()" title="Altyazı" style="padding:3px 10px; border-radius:6px; border:1px solid var(--border); background:var(--bg3); color:var(--text2); font-size:11px; cursor:pointer; display:flex; align-items:center; gap:4px;">
-              <span>CC</span><span id="wpSubtitleStatus" style="font-size:9px; color:var(--text3);">Kapalı</span>
-            </button>
+
+            <!-- Host Kontrolleri -->
+            <div id="wpHostControls" class="wp-host-controls" style="display:none; flex-direction:column; gap:10px; width:100%;">
+              <div style="display:flex; align-items:center; justify-content:center; gap:12px;">
+                <button id="wpPlayBtn" class="wp-play-btn" title="Oynat / Duraklat" style="display:none !important;">
+                  <svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><polygon points="5,3 19,12 5,21"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- Misafir Bildirimi -->
+            <div id="wpGuestNotice" style="display:none; flex-direction:column; align-items:center; justify-content:center; gap:6px; padding:10px 12px; background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:10px; width:100%;">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span style="font-size:12px;">👑</span>
+                <span style="font-size:11px; color:var(--text2); font-weight:500;">Oynatma ve süre kontrolü oda yöneticisine (host) aittir.</span>
+              </div>
+            </div>
           </div>
-
-          <div style="font-size:10px; color:var(--text3); text-align:center;">Tüm üyeler için senkronize oynatır</div>
         </div>
 
-        <!-- Misafir Bildirimi -->
-        <div id="wpGuestNotice" style="display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; padding:8px 12px; background:rgba(0,0,0,0.2); border-radius:10px; width:100%;">
-          <div style="display:flex; align-items:center; gap:6px;">
-            <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-            <span style="font-size:11px; color:var(--text2);">Oynatma kontrolü host'a ait</span>
+        <!-- Sağ Bölüm: Sohbet Alanı (Live Chat) -->
+        <div class="wp-right-side">
+          <div class="wp-chat-section">
+            <div id="watchPartyChat" class="wp-chat-box">
+              <!-- Mesajlar buraya gelir -->
+            </div>
+            <div class="wp-chat-input-row">
+              <input type="text" id="wpChatInput" class="wp-chat-input" placeholder="Mesaj yaz..." autocomplete="off" />
+              <button class="wp-chat-send" id="wpChatSendBtn">
+                <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              </button>
+            </div>
           </div>
-          <!-- Misafir için hız göstergesi -->
-          <div id="wpGuestSpeed" style="font-size:10px; color:var(--text3);">Hız: 1x</div>
-        </div>
-      </div>
-
-      <!-- Live Chat -->
-      <div class="wp-chat-section">
-        <div id="watchPartyChat" class="wp-chat-box">
-          <!-- Mesajlar buraya gelir -->
-        </div>
-        <div class="wp-chat-input-row">
-          <input type="text" id="wpChatInput" class="wp-chat-input" placeholder="Mesaj yaz..." autocomplete="off" />
-          <button class="wp-chat-send" id="wpChatSendBtn">
-            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-          </button>
         </div>
       </div>
 
@@ -1090,7 +1091,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
   
   <!-- Custom Confirm Modal -->
-  <div class="modal-overlay" id="confirmModal">
+  <div class="modal-overlay" id="confirmModal" style="z-index: 3000;">
     <div class="modal confirm-modal" style="border-radius: 32px; max-width: 340px; margin: auto;">
       <div class="modal-body" style="text-align: center; padding: 32px 24px;">
         <div id="confirmIcon" style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
@@ -1154,6 +1155,32 @@
             <div class="theme-name">Başkent</div>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════
+       BİLDİRİM İZİN PANELİ
+  ═══════════════════════════════════════════ -->
+  <div id="notifPermissionPanel" class="notif-panel" style="display:none;">
+    <div class="notif-panel-inner">
+      <div class="notif-panel-icon-wrap">
+        <div class="notif-panel-bell">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+            <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+            <circle cx="12" cy="8" r="1" fill="currentColor" stroke="none"/>
+          </svg>
+        </div>
+        <div class="notif-panel-pulse"></div>
+      </div>
+      <div class="notif-panel-body">
+        <p class="notif-panel-title">💬 Sohbet Bildirimlerini Aktif Et</p>
+        <p class="notif-panel-desc">Arkadaşların sana yeni bir mesaj veya film/dizi kartı gönderdiğinde anında haberdar ol.</p>
+      </div>
+      <div class="notif-panel-actions">
+        <button class="notif-btn-allow" id="notifAllowBtn">İzin Ver</button>
+        <button class="notif-btn-deny" id="notifDenyBtn">Şimdi Değil</button>
       </div>
     </div>
   </div>

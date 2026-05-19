@@ -1,5 +1,7 @@
 // app.js
 
+// SECURITY NOTE: In production environments, client-side configuration keys should be restricted
+// in the Firebase Console (HTTP Referrers / IP restrictions).
 const firebaseConfig = {
   apiKey: "AIzaSyCrOIe74W8DK_yFL4iXApgKGJ0Yngwtoj8",
   authDomain: "cinetrack-a6a6a.firebaseapp.com",
@@ -17,6 +19,8 @@ if (typeof firebase !== 'undefined') {
 const db = typeof firebase !== 'undefined' ? firebase.firestore() : null;
 const auth = typeof firebase !== 'undefined' ? firebase.auth() : null;
 
+// SECURITY NOTE: Hardcoding third-party API Keys on the client side exposes them to theft and quota abuse.
+// In production, route requests through a secure server-side API proxy or use build-time environment variables.
 const TMDB_API_KEY = '92b418e837b833be308bbfb1fb2aca1e';
 
 const App = {
@@ -60,6 +64,17 @@ const App = {
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('./sw.js').catch(err => console.log('SW fail', err));
         }
+
+        // Bildirim sistemi başlat
+        this.initNotifications();
+
+        // Listen for fullscreen change globally to update WatchParty fullscreen button status
+        document.addEventListener('fullscreenchange', () => {
+            const btn = document.getElementById('wpFullscreenBtn');
+            if (btn) {
+                btn.textContent = document.fullscreenElement ? '⊠' : '⛶';
+            }
+        });
 
         // Toggle Passwords (always bind these regardless of auth state)
         document.querySelectorAll('.toggle-password').forEach(btn => {
@@ -213,10 +228,47 @@ const App = {
         // Load user profile from Firestore
         if (db) {
             try {
-                const snap = await db.collection('users').doc(this.currentUser).get();
+                let snap = await db.collection('users').doc(this.currentUser).get();
+                let existingCode = null;
+                if (snap.exists) {
+                    existingCode = snap.data().friendCode;
+                }
+                if (!existingCode) {
+                    let unique = false;
+                    let code = '';
+                    let attempts = 0;
+                    while (!unique && attempts < 10) {
+                        code = 'CT-' + Math.random().toString(36).substring(2, 8).toUpperCase();
+                        const checkSnap = await db.collection('users').where('friendCode', '==', code).limit(1).get();
+                        if (checkSnap.empty) {
+                            unique = true;
+                        }
+                        attempts++;
+                    }
+                    existingCode = code;
+                }
+                
+                await db.collection('users').doc(this.currentUser).set({
+                    lastSeen: Date.now(),
+                    friendCode: existingCode
+                }, { merge: true });
+                
+                await db.collection('userData').doc(this.currentUser).set({
+                    lastSeen: Date.now(),
+                    friendCode: existingCode
+                }, { merge: true });
+
+                snap = await db.collection('users').doc(this.currentUser).get();
                 if (snap.exists) {
                     const data = snap.data();
                     this.state.currentUserData = data;
+                    this.state.friendCode = data.friendCode;
+                    
+                    const codeEl = document.getElementById('myFriendCodeDisplay');
+                    if (codeEl && data.friendCode) {
+                        codeEl.innerText = data.friendCode;
+                    }
+                    
                     // Also push into globalUsers for social features
                     if (!this.state.globalUsers.find(u => u.handle === this.currentUser)) {
                         this.state.globalUsers.push(data);
@@ -241,27 +293,21 @@ const App = {
         
         const profileUserName = document.getElementById('profileUserNameFull');
         if (profileUserName) {
-            profileUserName.innerHTML = `${userRecord.name || this.currentUser} <span style="font-size:14px; opacity:0.8; font-weight:normal;">@${userRecord.handle}</span>`;
+            const escapedName = this._escapeHtml(userRecord.name || this.currentUser || '');
+            const escapedHandle = this._escapeHtml(userRecord.handle || '');
+            profileUserName.innerHTML = `${escapedName} <span style="font-size:14px; opacity:0.8; font-weight:normal;">@${escapedHandle}</span>`;
         }
 
         // Easter Egg: 'deniz' ve 'kermode'
         const denizThemeBtn = document.getElementById('themeDeniz');
         if (denizThemeBtn) {
-            denizThemeBtn.style.display = ['deniz', 'kermode'].includes(this.currentUser) ? 'flex' : 'none';
+            denizThemeBtn.style.display = (this.currentUser === 'deniz' || this.hasAdminPrivileges()) ? 'flex' : 'none';
         }
 
-        // Sosyal sekme: sadece deniz ve kermode görebilir (easter egg)
+        // Sosyal sekme: Herkese açık!
         const navSocial = document.getElementById('navSocial');
         if (navSocial) {
-            const canSeeSocial = ['deniz', 'kermode'].includes(this.currentUser);
-            navSocial.style.display = canSeeSocial ? 'flex' : 'none';
-        }
-        
-        // Tab içeriğini de gizleyelim (ek güvenlik)
-        const tabSocial = document.getElementById('tab-social');
-        if (tabSocial) {
-            const canSeeSocial = ['deniz', 'kermode'].includes(this.currentUser);
-            if (!canSeeSocial) tabSocial.innerHTML = '<div style="padding:40px; text-align:center; color:var(--text3);">Bu bölüme erişim yetkiniz yok.</div>';
+            navSocial.style.display = 'flex';
         }
         
         // Data Migration / Loading (localStorage – will move to Firestore in Step 2)
@@ -338,6 +384,7 @@ const App = {
                 this.userDataUnsubscribe = db.collection('userData').doc(this.currentUser).onSnapshot(doc => {
                     if (doc.exists) {
                         const d = doc.data();
+                        this.state.isAdmin        = d.isAdmin        || false;
                         this.state.following      = d.following      || [];
                         this.state.followers      = d.followers      || [];
                         this.state.followRequests = d.followRequests || [];
@@ -374,7 +421,7 @@ const App = {
         // Easter Eggs Check
         if (this.currentUser === 'deniz') {
             this.triggerDenizEasterEgg();
-        } else if (this.currentUser === 'kermode') {
+        } else if (this.hasAdminPrivileges()) {
             this.triggerKermodeAdmin();
         } else {
             document.documentElement.style.removeProperty('--primary');
@@ -499,11 +546,14 @@ const App = {
             following: this.state.following,
             hiddenChats: this.state.hiddenChats || [],
             collections: this.state.collections || [],
-            dailyPageGoal: this.state.dailyPageGoal || 20
+            dailyPageGoal: this.state.dailyPageGoal || 20,
+            lastSeen: Date.now()
         };
         if (db) {
             db.collection('userData').doc(this.currentUser).set(payload, { merge: true })
               .catch(e => console.warn('Firestore save error:', e));
+            db.collection('users').doc(this.currentUser).set({ lastSeen: Date.now() }, { merge: true })
+              .catch(e => console.warn('Firestore users save error:', e));
         }
     },
 
@@ -540,78 +590,82 @@ const App = {
             this.renderBooks();
         });
 
+        let globalSearchTimeout = null;
         const si = document.getElementById('searchInput');
         if (si) si.addEventListener('input', (e) => {
-            const query = e.target.value.trim().toLocaleLowerCase('tr');
-            const resContainer = document.getElementById('globalSearchResults');
-            if (!resContainer) return;
-            
-            if (query.length < 2) {
-                resContainer.classList.add('hidden');
+            clearTimeout(globalSearchTimeout);
+            globalSearchTimeout = setTimeout(() => {
+                const query = e.target.value.trim().toLocaleLowerCase('tr');
+                const resContainer = document.getElementById('globalSearchResults');
+                if (!resContainer) return;
+                
+                if (query.length < 2) {
+                    resContainer.classList.add('hidden');
+                    this.renderMovies();
+                    this.renderSeries();
+                    this.renderBooks();
+                    return;
+                }
+
+                // Global Search Results
+                const matchedMovies = (this.state.movies || []).filter(m => m.title.toLocaleLowerCase('tr').includes(query));
+                const matchedSeries = (this.state.series || []).filter(s => s.title.toLocaleLowerCase('tr').includes(query));
+                const matchedBooks  = (this.state.books  || []).filter(b => b.title.toLocaleLowerCase('tr').includes(query));
+                
+                let html = '';
+                
+                matchedMovies.forEach(m => {
+                    const poster = m.poster ? `<img src="${m.poster}" style="width:100%;height:100%;object-fit:cover;border-radius:6px;"/>` : '🎬';
+                    html += `
+                        <div class="tmdb-item" onclick="document.getElementById('globalSearchResults').classList.add('hidden'); App.openMovieDetail('${m.id}')">
+                            <div class="tmdb-poster">${poster}</div>
+                            <div class="tmdb-info">
+                                <div class="tmdb-title">${this._escapeHtml(m.title)}</div>
+                                <div class="tmdb-year">🎬 Film ${m.year ? '- '+m.year : ''}</div>
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                matchedSeries.forEach(s => {
+                    const poster = s.poster ? `<img src="${s.poster}" style="width:100%;height:100%;object-fit:cover;border-radius:6px;"/>` : '📺';
+                    html += `
+                        <div class="tmdb-item" onclick="document.getElementById('globalSearchResults').classList.add('hidden'); App.openSeriesDetail('${s.id}')">
+                            <div class="tmdb-poster">${poster}</div>
+                            <div class="tmdb-info">
+                                <div class="tmdb-title">${this._escapeHtml(s.title)}</div>
+                                <div class="tmdb-year">📺 Dizi ${s.year ? '- '+s.year : ''}</div>
+                            </div>
+                        </div>
+                    `;
+                });
+
+                matchedBooks.forEach(b => {
+                    const cover = b.poster || b.cover;
+                    const posterHtml = cover ? `<img src="${cover}" style="width:100%;height:100%;object-fit:cover;border-radius:6px;"/>` : '📚';
+                    html += `
+                        <div class="tmdb-item" onclick="document.getElementById('globalSearchResults').classList.add('hidden'); App.openBookDetail('${b.id}')">
+                            <div class="tmdb-poster">${posterHtml}</div>
+                            <div class="tmdb-info">
+                                <div class="tmdb-title">${this._escapeHtml(b.title)}</div>
+                                <div class="tmdb-year">📚 Kitap ${b.year ? '- '+b.year : ''}</div>
+                            </div>
+                        </div>
+                    `;
+                });
+
+                if (html === '') {
+                    html = '<div class="tmdb-loading">Sonuç bulunamadı.</div>';
+                }
+                
+                resContainer.innerHTML = html;
+                resContainer.classList.remove('hidden');
+
+                // Render current tabs as well
                 this.renderMovies();
                 this.renderSeries();
                 this.renderBooks();
-                return;
-            }
-
-            // Global Search Results
-            const matchedMovies = (this.state.movies || []).filter(m => m.title.toLocaleLowerCase('tr').includes(query));
-            const matchedSeries = (this.state.series || []).filter(s => s.title.toLocaleLowerCase('tr').includes(query));
-            const matchedBooks  = (this.state.books  || []).filter(b => b.title.toLocaleLowerCase('tr').includes(query));
-            
-            let html = '';
-            
-            matchedMovies.forEach(m => {
-                const poster = m.poster ? `<img src="${m.poster}" style="width:100%;height:100%;object-fit:cover;border-radius:6px;"/>` : '🎬';
-                html += `
-                    <div class="tmdb-item" onclick="document.getElementById('globalSearchResults').classList.add('hidden'); App.openMovieDetail('${m.id}')">
-                        <div class="tmdb-poster">${poster}</div>
-                        <div class="tmdb-info">
-                            <div class="tmdb-title">${m.title}</div>
-                            <div class="tmdb-year">🎬 Film ${m.year ? '- '+m.year : ''}</div>
-                        </div>
-                    </div>
-                `;
-            });
-            
-            matchedSeries.forEach(s => {
-                const poster = s.poster ? `<img src="${s.poster}" style="width:100%;height:100%;object-fit:cover;border-radius:6px;"/>` : '📺';
-                html += `
-                    <div class="tmdb-item" onclick="document.getElementById('globalSearchResults').classList.add('hidden'); App.openSeriesDetail('${s.id}')">
-                        <div class="tmdb-poster">${poster}</div>
-                        <div class="tmdb-info">
-                            <div class="tmdb-title">${s.title}</div>
-                            <div class="tmdb-year">📺 Dizi ${s.year ? '- '+s.year : ''}</div>
-                        </div>
-                    </div>
-                `;
-            });
-
-            matchedBooks.forEach(b => {
-                const cover = b.poster || b.cover;
-                const posterHtml = cover ? `<img src="${cover}" style="width:100%;height:100%;object-fit:cover;border-radius:6px;"/>` : '📚';
-                html += `
-                    <div class="tmdb-item" onclick="document.getElementById('globalSearchResults').classList.add('hidden'); App.openBookDetail('${b.id}')">
-                        <div class="tmdb-poster">${posterHtml}</div>
-                        <div class="tmdb-info">
-                            <div class="tmdb-title">${b.title}</div>
-                            <div class="tmdb-year">📚 Kitap ${b.year ? '- '+b.year : ''}</div>
-                        </div>
-                    </div>
-                `;
-            });
-
-            if (html === '') {
-                html = '<div class="tmdb-loading">Sonuç bulunamadı.</div>';
-            }
-            
-            resContainer.innerHTML = html;
-            resContainer.classList.remove('hidden');
-
-            // Render current tabs as well
-            this.renderMovies();
-            this.renderSeries();
-            this.renderBooks();
+            }, 150);
         });
 
         // Add Modal
@@ -743,6 +797,8 @@ const App = {
             document.getElementById('allBadgesModal').classList.add('open');
         });
         if(document.getElementById('movieShareBtn')) document.getElementById('movieShareBtn').addEventListener('click', () => this.openShareCard('movie'));
+        if(document.getElementById('seriesShareBtn')) document.getElementById('seriesShareBtn').addEventListener('click', () => this.openShareCard('series'));
+        if(document.getElementById('bookShareBtn')) document.getElementById('bookShareBtn').addEventListener('click', () => this.openShareCard('books'));
 
         // Detail Actions
         document.getElementById('movieDetailDeleteBtn').addEventListener('click', () => this.deleteItem('movie'));
@@ -756,24 +812,9 @@ const App = {
         if (document.getElementById('otherProfileFollowBtn')) document.getElementById('otherProfileFollowBtn').addEventListener('click', () => this.toggleFollow());
         if (document.getElementById('chatCloseBtn')) document.getElementById('chatCloseBtn').addEventListener('click', () => this.closeModals());
         if (document.getElementById('deleteAccountBtn')) document.getElementById('deleteAccountBtn').addEventListener('click', () => this.deleteAccount());
-        if (document.getElementById('socialSearchInput')) {
-            const searchInput = document.getElementById('socialSearchInput');
-            searchInput.addEventListener('input', (e) => {
-                const q = e.target.value.trim();
-                if (q.length === 0) {
-                    document.getElementById('userSearchResults').style.display = 'none';
-                } else {
-                    this.renderUserSearch(q);
-                }
-            });
-            searchInput.addEventListener('focus', (e) => {
-                if (e.target.value.trim()) this.renderUserSearch(e.target.value.trim());
-            });
-            document.addEventListener('click', (e) => {
-                if (!e.target.closest('#tab-social .search-bar') && !e.target.closest('#userSearchResults')) {
-                    const r = document.getElementById('userSearchResults');
-                    if (r) r.style.display = 'none';
-                }
+        if (document.getElementById('friendCodeInput')) {
+            document.getElementById('friendCodeInput').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') this.addFriendByCode();
             });
         }
         if (document.getElementById('chatSendBtn')) {
@@ -789,7 +830,7 @@ const App = {
             const code = prompt('Katılmak istediğin oda kodunu gir:');
             if (code) this.openWatchPartyRoom(code.trim());
         });
-        if (document.getElementById('watchPartyCloseBtn')) document.getElementById('watchPartyCloseBtn').addEventListener('click', () => this._closeWpModal());
+        if (document.getElementById('watchPartyCloseBtn')) document.getElementById('watchPartyCloseBtn').addEventListener('click', () => this.closeWatchParty());
         if (document.getElementById('wpClosePartyBtn')) document.getElementById('wpClosePartyBtn').addEventListener('click', () => this.closeWatchParty());
         if (document.getElementById('wpPlayBtn')) document.getElementById('wpPlayBtn').addEventListener('click', () => this.toggleWatchPartyState());
         if (document.getElementById('wpChatSendBtn')) document.getElementById('wpChatSendBtn').addEventListener('click', () => this.sendWatchPartyMessage());
@@ -927,12 +968,6 @@ const App = {
         if (tab === 'series') this.renderSeries();
         if (tab === 'books') this.renderBooks();
         if (tab === 'social') {
-            const canSeeSocial = ['deniz', 'kermode'].includes(this.currentUser);
-            if (!canSeeSocial) {
-                this.showToast('Bu sekme henüz size açık değil 🔒');
-                this.switchTab('dashboard');
-                return;
-            }
             this.renderSocialTab();
         }
     },
@@ -2160,10 +2195,16 @@ const App = {
         }
     },
 
-    openMovieDetail(id) {
-        const m = this.state.movies.find(x => x.id === id);
+    openMovieDetail(idOrItem) {
+        let m;
+        if (typeof idOrItem === 'object') {
+            m = idOrItem;
+        } else {
+            m = this.state.movies.find(x => x.id === idOrItem);
+        }
         if (!m) return;
         
+        const id = m.id;
         this.editingId = id;
         
         let starsInteractive = `<div class="interactive-stars" style="margin-top: 10px; display: flex; align-items: center; justify-content: center; gap: 4px;">`;
@@ -2202,52 +2243,88 @@ const App = {
         const favBtn = document.getElementById('movieFavoriteBtn');
         if (favBtn) {
             favBtn.innerText = m.favorite ? '❤️ Favoriden Çıkar' : '🤍 Favori';
+            favBtn.style.display = m.isSharedTemp ? 'none' : 'block';
         }
+
+        const isTemp = !!m.isSharedTemp;
+        const deleteBtn = document.getElementById('movieDetailDeleteBtn');
+        if (deleteBtn) {
+            if (isTemp) {
+                deleteBtn.innerText = '📥 Kütüphaneye Ekle';
+                deleteBtn.style.background = 'var(--primary)';
+                deleteBtn.style.color = 'white';
+                deleteBtn.onclick = () => App.addSharedItemToLibrary('movie', m);
+            } else {
+                deleteBtn.innerText = '🗑️ Sil';
+                deleteBtn.style.background = 'var(--red)';
+                deleteBtn.style.color = 'white';
+                deleteBtn.onclick = () => App.deleteItem('movie');
+            }
+        }
+
+        const shareBtn = document.getElementById('movieShareBtn');
+        if (shareBtn) {
+            shareBtn.style.display = isTemp ? 'none' : 'block';
+        }
+
         document.getElementById('movieDetailModal').classList.add('open');
         this.pushHistoryState();
     },
 
-    openSeriesDetail(id) {
-        const s = this.state.series.find(x => x.id === id);
+    openSeriesDetail(idOrItem) {
+        let s;
+        if (typeof idOrItem === 'object') {
+            s = idOrItem;
+        } else {
+            s = this.state.series.find(x => x.id === idOrItem);
+        }
         if (!s) return;
         
+        const id = s.id;
         this.editingId = id;
+        
+        s.seasons = s.seasons || 1;
+        s.episodes = s.episodes || 1;
         
         let seasonsHtml = '';
         
-        if (s.seasonsData && s.seasonsData.length > 0) {
-            s.seasonsData.forEach(sd => {
-                let epsHtml = '';
-                for (let j = 1; j <= sd.episodes; j++) {
-                    const epId = `${sd.season}-${j}`;
-                    const isWatched = (s.watchedEps || []).includes(epId);
-                    epsHtml += `<button class="ep-btn ${isWatched ? 'watched' : ''}" onclick="App.toggleEpisode('${id}', '${epId}', this)">${j}</button>`;
+        const isTemp = !!s.isSharedTemp;
+        
+        if (!isTemp) {
+            if (s.seasonsData && s.seasonsData.length > 0) {
+                s.seasonsData.forEach(sd => {
+                    let epsHtml = '';
+                    for (let j = 1; j <= sd.episodes; j++) {
+                        const epId = `${sd.season}-${j}`;
+                        const isWatched = (s.watchedEps || []).includes(epId);
+                        epsHtml += `<button class="ep-btn ${isWatched ? 'watched' : ''}" onclick="App.toggleEpisode('${id}', '${epId}', this)">${j}</button>`;
+                    }
+                    seasonsHtml += `
+                        <div class="season-block">
+                            <h4>Sezon ${sd.season}</h4>
+                            <div class="eps-grid">${epsHtml}</div>
+                        </div>
+                    `;
+                });
+            } else {
+                const epsPerSeason = Math.ceil(s.episodes / s.seasons);
+                for (let i = 1; i <= s.seasons; i++) {
+                    let epsHtml = '';
+                    const epsInThisSeason = i === s.seasons ? (s.episodes - (i-1)*epsPerSeason) : epsPerSeason;
+                    
+                    for (let j = 1; j <= epsInThisSeason; j++) {
+                        const epId = `${i}-${j}`;
+                        const isWatched = (s.watchedEps || []).includes(epId);
+                        epsHtml += `<button class="ep-btn ${isWatched ? 'watched' : ''}" onclick="App.toggleEpisode('${id}', '${epId}', this)">${j}</button>`;
+                    }
+                    
+                    seasonsHtml += `
+                        <div class="season-block">
+                            <h4>Sezon ${i}</h4>
+                            <div class="eps-grid">${epsHtml}</div>
+                        </div>
+                    `;
                 }
-                seasonsHtml += `
-                    <div class="season-block">
-                        <h4>Sezon ${sd.season}</h4>
-                        <div class="eps-grid">${epsHtml}</div>
-                    </div>
-                `;
-            });
-        } else {
-            const epsPerSeason = Math.ceil(s.episodes / s.seasons);
-            for (let i = 1; i <= s.seasons; i++) {
-                let epsHtml = '';
-                const epsInThisSeason = i === s.seasons ? (s.episodes - (i-1)*epsPerSeason) : epsPerSeason;
-                
-                for (let j = 1; j <= epsInThisSeason; j++) {
-                    const epId = `${i}-${j}`;
-                    const isWatched = (s.watchedEps || []).includes(epId);
-                    epsHtml += `<button class="ep-btn ${isWatched ? 'watched' : ''}" onclick="App.toggleEpisode('${id}', '${epId}', this)">${j}</button>`;
-                }
-                
-                seasonsHtml += `
-                    <div class="season-block">
-                        <h4>Sezon ${i}</h4>
-                        <div class="eps-grid">${epsHtml}</div>
-                    </div>
-                `;
             }
         }
 
@@ -2281,6 +2358,7 @@ const App = {
             </div>
             ${starsInteractive}
             ${s.note ? `<div class="detail-note">${s.note}</div>` : ''}
+            ${isTemp ? '' : `
             <div style="margin: 12px 0 4px;">
                 <button onclick="App.refreshSeriesFromTMDB('${s.id}')" style="width:100%; padding:10px; background:rgba(168,85,247,0.12); border:1px solid var(--primary); color:var(--primary); border-radius:10px; font-size:13px; font-weight:600; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px;">
                     🔄 Sezon/Bölüm Verilerini TMDB'den Güncelle
@@ -2290,13 +2368,36 @@ const App = {
                 <h3>Bölümler</h3>
                 ${seasonsHtml}
             </div>
+            `}
         `;
         
         document.getElementById('seriesDetailBody').innerHTML = body;
         const favBtn = document.getElementById('seriesFavoriteBtn');
         if (favBtn) {
             favBtn.innerText = s.favorite ? '❤️ Favoriden Çıkar' : '🤍 Favoriye Ekle';
+            favBtn.style.display = isTemp ? 'none' : 'block';
         }
+
+        const deleteBtn = document.getElementById('seriesDetailDeleteBtn');
+        if (deleteBtn) {
+            if (isTemp) {
+                deleteBtn.innerText = '📥 Kütüphaneye Ekle';
+                deleteBtn.style.background = 'var(--primary)';
+                deleteBtn.style.color = 'white';
+                deleteBtn.onclick = () => App.addSharedItemToLibrary('series', s);
+            } else {
+                deleteBtn.innerText = '🗑️ Sil';
+                deleteBtn.style.background = 'var(--red)';
+                deleteBtn.style.color = 'white';
+                deleteBtn.onclick = () => App.deleteItem('series');
+            }
+        }
+
+        const shareBtn = document.getElementById('seriesShareBtn');
+        if (shareBtn) {
+            shareBtn.style.display = isTemp ? 'none' : 'block';
+        }
+
         document.getElementById('seriesDetailModal').classList.add('open');
         this.pushHistoryState();
     },
@@ -2666,10 +2767,16 @@ const App = {
     openShareCard(type) {
         document.getElementById('movieDetailModal').classList.remove('open');
         document.getElementById('seriesDetailModal').classList.remove('open');
+        document.getElementById('bookDetailModal').classList.remove('open');
         
-        const item = type === 'movie' 
-            ? this.state.movies.find(m => m.id === this.editingId)
-            : this.state.series.find(s => s.id === this.editingId);
+        let item = null;
+        if (type === 'movie') {
+            item = this.state.movies.find(m => m.id === this.editingId);
+        } else if (type === 'series') {
+            item = this.state.series.find(s => s.id === this.editingId);
+        } else if (type === 'books') {
+            item = this.state.books.find(b => b.id === this.editingId);
+        }
             
         if (!item) return;
 
@@ -2687,7 +2794,155 @@ const App = {
         const ratingStr = item.rating ? '⭐'.repeat(item.rating) : '👀 İzledim';
         document.getElementById('shareCardRating').innerText = ratingStr;
 
+        // Render friends list for direct sharing
+        const shareFriendsList = document.getElementById('shareFriendsList');
+        if (shareFriendsList) {
+            const contacts = this.state.following || [];
+            if (contacts.length === 0) {
+                shareFriendsList.innerHTML = '<div style="font-size:12px; color:var(--text3); padding:8px 0;">Henüz arkadaşınız yok.</div>';
+            } else {
+                shareFriendsList.innerHTML = contacts.map(handle => {
+                    const u = this.state.globalUsers.find(x => x.handle === handle) || { handle, name: handle, avatar: '👤' };
+                    return `
+                        <div onclick="App.shareToChat('${type}', '${item.id}', '${handle}')" 
+                             style="display:flex; flex-direction:column; align-items:center; gap:6px; cursor:pointer; flex-shrink:0; width:64px; text-align:center;">
+                            <div style="font-size:24px; width:36px; height:36px; display:flex; align-items:center; justify-content:center; background:var(--bg3); border-radius:50%; border:1px solid var(--border); transition: transform 0.2s;" onmouseenter="this.style.transform='scale(1.1)'" onmouseleave="this.style.transform='scale(1)'">
+                                ${u.avatar || '👤'}
+                            </div>
+                            <span style="font-size:10px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; width:100%; color:var(--text2);">
+                                ${u.name.split(' ')[0]}
+                            </span>
+                        </div>
+                    `;
+                }).join('');
+            }
+        }
+
         document.getElementById('shareModal').classList.add('open');
+    },
+
+    async shareToChat(type, itemId, targetHandle) {
+        if (!db) return;
+        const item = type === 'movie' 
+            ? this.state.movies.find(m => m.id === itemId)
+            : type === 'series'
+                ? this.state.series.find(s => s.id === itemId)
+                : this.state.books.find(b => b.id === itemId);
+        if (!item) return;
+
+        const chatId = [this.currentUser, targetHandle].sort().join('_');
+        const payload = {
+            type,
+            id: itemId,
+            title: item.title,
+            poster: item.poster || item.cover || '',
+            rating: item.rating || 0
+        };
+        const text = `[SHARE:${JSON.stringify(payload)}]`;
+        try {
+            await db.collection('messages').doc(chatId).collection('msgs').add({
+                sender: this.currentUser,
+                receiver: targetHandle,
+                text: text,
+                timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                read: false
+            });
+            this.showToast('🚀 Kart sohbete gönderildi!');
+            this.closeModals();
+        } catch(e) {
+            console.error('Share to chat error:', e);
+            this.showToast('Gönderilemedi', true);
+        }
+    },
+
+    openShareDetail(type, id, title = '', poster = '', rating = 0) {
+        this.closeModals();
+        this.editingId = id;
+        
+        let exists = false;
+        if (type === 'movie') {
+            exists = this.state.movies.some(x => x.id === id);
+        } else if (type === 'series') {
+            exists = this.state.series.some(x => x.id === id);
+        } else if (type === 'books') {
+            exists = this.state.books.some(x => x.id === id);
+        }
+
+        if (exists) {
+            if (type === 'movie') this.openMovieDetail(id);
+            else if (type === 'series') this.openSeriesDetail(id);
+            else if (type === 'books') this.openBookDetail(id);
+        } else {
+            // Create a temporary shared item object
+            const tempItem = {
+                id: id,
+                title: title,
+                poster: poster,
+                rating: rating,
+                status: type === 'books' ? 'readlist' : 'watchlist',
+                isSharedTemp: true
+            };
+            if (type === 'movie') this.openMovieDetail(tempItem);
+            else if (type === 'series') this.openSeriesDetail(tempItem);
+            else if (type === 'books') this.openBookDetail(tempItem);
+        }
+    },
+
+    async addSharedItemToLibrary(type, item) {
+        if (!this.currentUser) return;
+        const newItem = {
+            id: Date.now().toString(),
+            title: item.title,
+            poster: item.poster || '',
+            rating: item.rating || 0,
+            status: type === 'books' ? 'readlist' : 'watchlist',
+            type: type,
+            createdAt: Date.now(),
+            updatedAt: Date.now()
+        };
+        if (type === 'movie') {
+            this.state.movies.push(newItem);
+        } else if (type === 'series') {
+            newItem.seasons = 1;
+            newItem.episodes = 1;
+            this.state.series.push(newItem);
+        } else if (type === 'books') {
+            newItem.author = '';
+            newItem.pages = 100;
+            newItem.currentPage = 0;
+            this.state.books.push(newItem);
+        }
+        this.save();
+        this.showToast('📥 Kütüphanenize eklendi!');
+        this.closeModals();
+        this.renderAll();
+    },
+
+    openShareDetailFromMessage(msgId, event) {
+        if (event) event.stopPropagation();
+        if (!this.currentChatMessages) return;
+        const msg = this.currentChatMessages.find(m => m.id === msgId);
+        if (!msg) return;
+
+        if (msg.text.startsWith('[SHARE:') && msg.text.endsWith(']')) {
+            const raw = msg.text.slice(7, -1);
+            if (raw.startsWith('{')) {
+                try {
+                    const data = JSON.parse(raw);
+                    this.openShareDetail(data.type, data.id, data.title, data.poster || '', data.rating || 0);
+                } catch(e) {
+                    console.error('Failed to parse share JSON:', e);
+                }
+            } else {
+                const parts = raw.split(':');
+                const shareType = parts[0];
+                const shareId = parts[1];
+                const shareTitle = parts[2];
+                const sharePoster = parts[3] || '';
+                const shareRating = parseInt(parts[4]) || 0;
+                this.openShareDetail(shareType, shareId, shareTitle, sharePoster, shareRating);
+            }
+        }
     },
 
     getFavoriteGenreId() {
@@ -2795,6 +3050,19 @@ const App = {
         this.renderConversationsList();
         this.renderFollowRequestsUI();
         this.renderActiveWatchParties();
+
+        // Update Friend Code display
+        const codeEl = document.getElementById('myFriendCodeDisplay');
+        if (codeEl) {
+            codeEl.innerText = this.state.friendCode || 'Yükleniyor...';
+        }
+
+        // Hide Watch Party widget for everyone except kermode and deniz
+        const wpWidget = document.getElementById('watchPartyWidget');
+        if (wpWidget) {
+            const canSeeWp = this.currentUser === 'deniz' || this.hasAdminPrivileges();
+            wpWidget.style.display = canSeeWp ? 'block' : 'none';
+        }
     },
 
     renderFollowRequestsUI() {
@@ -2908,20 +3176,24 @@ const App = {
                 btnStyle = 'border:1px solid var(--border); background:var(--bg3); color:var(--text);';
             }
 
+            const escapedAvatar = this._escapeHtml(u.avatar || '👤');
+            const escapedName = this._escapeHtml(u.name || u.handle || '');
+            const escapedHandle = this._escapeHtml(u.handle || '');
+            
             return `
             <div style="display:flex; align-items:center; gap:12px; padding:12px 16px; border-bottom:1px solid var(--border); cursor:pointer;"
                  onmouseenter="this.style.background='var(--bg3)'" onmouseleave="this.style.background='transparent'">
-                <div style="font-size:28px; flex-shrink:0;">${u.avatar || '👤'}</div>
+                <div style="font-size:28px; flex-shrink:0;">${escapedAvatar}</div>
                 <div style="flex:1; min-width:0;">
-                    <div style="font-size:14px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${u.name}</div>
-                    <div style="font-size:12px; color:var(--text2);">@${u.handle}</div>
+                    <div style="font-size:14px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapedName}</div>
+                    <div style="font-size:12px; color:var(--text2);">@${escapedHandle}</div>
                 </div>
                 <div style="display:flex; gap:8px; flex-shrink:0;">
-                    <button onclick="App.quickToggleFollow('${u.handle}'); event.stopPropagation();" 
+                    <button onclick="App.quickToggleFollow('${escapedHandle}'); event.stopPropagation();" 
                         style="padding:6px 12px; border-radius:20px; font-size:11px; font-weight:600; cursor:pointer; transition:all 0.2s; ${btnStyle}">
                         ${btnText}
                     </button>
-                    <button onclick="App.safeOpenChat('${u.handle}'); document.getElementById('userSearchResults').style.display='none'; document.getElementById('socialSearchInput').value=''; event.stopPropagation();"
+                    <button onclick="App.safeOpenChat('${escapedHandle}'); document.getElementById('userSearchResults').style.display='none'; document.getElementById('socialSearchInput').value=''; event.stopPropagation();"
                         style="padding:6px 12px; border-radius:20px; border:1px solid var(--primary); background:transparent; color:var(--primary); font-size:11px; font-weight:600; cursor:pointer;">
                         Mesaj
                     </button>
@@ -2960,8 +3232,6 @@ const App = {
                 this.showToast('📨 Takip isteği gönderildi');
             }
             this.renderProfileStats();
-            const q = document.getElementById('socialSearchInput')?.value?.trim();
-            if (q) this.renderUserSearch(q);
         } catch(e) {
             this.showToast('❌ Hata: ' + e.message);
         }
@@ -2969,11 +3239,130 @@ const App = {
 
     safeOpenChat(handle) {
         // Enforce: only message people you follow (who accepted your request) or admins
-        if (this.currentUser !== 'kermode' && !this.state.following.includes(handle)) {
+        if (!this.hasAdminPrivileges() && !this.state.following.includes(handle)) {
             this.showToast('💬 Sadece takip ettiğiniz (takip isteğinizi onaylayan) kişilere mesaj gönderebilirsiniz.');
             return;
         }
         this.openChat(handle);
+    },
+
+    copyFriendCode() {
+        if (!this.state.friendCode) {
+            this.showToast('Arkadaşlık kodu henüz yüklenmedi.');
+            return;
+        }
+        navigator.clipboard.writeText(this.state.friendCode)
+            .then(() => this.showToast('📋 Arkadaşlık kodu kopyalandı!'))
+            .catch(() => this.showToast('Kopyalanamadı', true));
+    },
+
+    async addFriendByCode() {
+        const input = document.getElementById('friendCodeInput');
+        if (!input) return;
+        const code = input.value.trim().toUpperCase();
+        if (!code) {
+            this.showToast('Lütfen bir arkadaşlık kodu girin.', true);
+            return;
+        }
+
+        if (code === this.state.friendCode) {
+            this.showToast('Kendi arkadaşlık kodunuzu ekleyemezsiniz.', true);
+            return;
+        }
+
+        if (!db) {
+            this.showToast('Bağlantı hatası: İnternet bağlantınızı kontrol edin.', true);
+            return;
+        }
+
+        try {
+            // Find target user by friendCode
+            const snap = await db.collection('users').where('friendCode', '==', code).limit(1).get();
+            if (snap.empty) {
+                this.showToast('❌ Geçersiz arkadaşlık kodu.', true);
+                return;
+            }
+
+            const targetUser = snap.docs[0].data();
+            const targetHandle = targetUser.handle;
+
+            if (targetHandle === this.currentUser) {
+                this.showToast('Kendi kodunuzu ekleyemezsiniz.', true);
+                return;
+            }
+
+            // Establish mutual follow
+            // Current User follows Target User
+            await db.collection('userData').doc(this.currentUser).set({
+                following: firebase.firestore.FieldValue.arrayUnion(targetHandle),
+                followers: firebase.firestore.FieldValue.arrayUnion(targetHandle),
+                followRequests: firebase.firestore.FieldValue.arrayRemove(targetHandle),
+                sentRequests: firebase.firestore.FieldValue.arrayRemove(targetHandle)
+            }, { merge: true });
+
+            // Target User follows Current User
+            await db.collection('userData').doc(targetHandle).set({
+                following: firebase.firestore.FieldValue.arrayUnion(this.currentUser),
+                followers: firebase.firestore.FieldValue.arrayUnion(this.currentUser),
+                followRequests: firebase.firestore.FieldValue.arrayRemove(this.currentUser),
+                sentRequests: firebase.firestore.FieldValue.arrayRemove(this.currentUser)
+            }, { merge: true });
+
+            // Update local state
+            if (!this.state.following) this.state.following = [];
+            if (!this.state.following.includes(targetHandle)) this.state.following.push(targetHandle);
+            if (!this.state.followers) this.state.followers = [];
+            if (!this.state.followers.includes(targetHandle)) this.state.followers.push(targetHandle);
+
+            // Re-fetch all users to make sure we have their profiles
+            const allUsersSnap = await db.collection('users').get();
+            this.state.globalUsers = allUsersSnap.docs.map(d => d.data());
+
+            // Clear input and show success
+            input.value = '';
+            this.showToast(`🎉 @${targetHandle} ile başarıyla arkadaş olundu!`);
+
+            // Re-render UI elements
+            this.renderConversationsList();
+            this.renderProfileStats();
+        } catch (e) {
+            console.error('Add friend error:', e);
+            this.showToast('Bir hata oluştu: ' + e.message, true);
+        }
+    },
+
+    getUserStatusHTML(user) {
+        if (!user.lastSeen) return '<span style="color:var(--text3); font-size:11px;">Çevrimdışı</span>';
+        const diff = Date.now() - user.lastSeen;
+        if (diff < 5 * 60 * 1000) {
+            return '<span style="color:var(--green); font-size:11px; display:inline-flex; align-items:center; gap:4px;"><span style="width:6px; height:6px; border-radius:50%; background:var(--green); display:inline-block;"></span>Çevrimiçi</span>';
+        } else {
+            const date = new Date(user.lastSeen);
+            const timeStr = date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            const dateStr = date.toLocaleDateString([], {day: 'numeric', month: 'short'});
+            return `<span style="color:var(--text3); font-size:11px;">Son görülme: ${dateStr} ${timeStr}</span>`;
+        }
+    },
+
+    async onMessageClick(msgId, isMe) {
+        if (!isMe) return;
+        if (await this.showConfirm('Mesajı Sil', 'Bu mesajı silmek istediğinize emin misiniz?', '🗑️')) {
+            const chatId = [this.currentUser, this.currentChatHandle].sort().join('_');
+            try {
+                await db.collection('messages').doc(chatId).collection('msgs').doc(msgId).delete();
+                this.showToast('Mesaj silindi');
+            } catch (e) {
+                this.showToast('Hata: ' + e.message, true);
+            }
+        }
+    },
+
+    insertChatEmoji(emoji) {
+        const input = document.getElementById('chatInput');
+        if (input) {
+            input.value += emoji;
+            input.focus();
+        }
     },
 
     async renderConversationsList() {
@@ -2987,13 +3376,78 @@ const App = {
             list.innerHTML = `
                 <div class="empty-widget" style="text-align:center; color:var(--text3); padding:32px 16px;">
                     <div style="font-size:36px; margin-bottom:8px;">💬</div>
-                    <div>Sohbet listesi boş. Yukarıdaki aramadan birini bul ve mesaj at!</div>
+                    <div>Sohbet listesi boş. Yukarıdan arkadaşlık kodu ile birini ekleyerek sohbete başlayabilirsin!</div>
                 </div>`;
             return;
         }
 
+        // Fetch unread message counts per sender
+        const unreadSnap = await db.collectionGroup('msgs')
+            .where('receiver', '==', this.currentUser)
+            .where('read', '==', false)
+            .get().catch(() => null);
+        const unreadSenders = {};
+        if (unreadSnap) {
+            unreadSnap.docs.forEach(doc => {
+                const d = doc.data();
+                if (d.sender) {
+                    unreadSenders[d.sender] = (unreadSenders[d.sender] || 0) + 1;
+                }
+            });
+        }
+
+        // Fetch last message previews in parallel
+        const lastMsgs = {};
+        await Promise.all(visibleContacts.map(async (handle) => {
+            const chatId = [this.currentUser, handle].sort().join('_');
+            const msgSnap = await db.collection('messages').doc(chatId).collection('msgs')
+                .orderBy('timestamp', 'desc')
+                .limit(1)
+                .get().catch(() => null);
+            if (msgSnap && !msgSnap.empty) {
+                lastMsgs[handle] = msgSnap.docs[0].data();
+            }
+        }));
+
         list.innerHTML = visibleContacts.map(handle => {
             const u = this.state.globalUsers.find(x => x.handle === handle) || { handle, name: handle, avatar: '👤' };
+            const unreadCount = unreadSenders[u.handle] || 0;
+            const badgeHTML = unreadCount > 0 
+                ? `<span style="background:var(--red); color:white; font-size:10px; font-weight:bold; border-radius:50%; width:16px; height:16px; display:inline-flex; align-items:center; justify-content:center; margin-left:8px;">${unreadCount}</span>` 
+                : '';
+
+            // Check if online
+            const isOnline = u.lastSeen && (Date.now() - u.lastSeen < 5 * 60 * 1000);
+            const onlineDot = isOnline 
+                ? `<span style="position:absolute; bottom:0; right:0; width:10px; height:10px; border-radius:50%; background:var(--green); border:2px solid var(--bg2); box-shadow:0 0 6px var(--green);"></span>` 
+                : '';
+
+            // Prepare preview
+            let previewText = `@${u.handle}`;
+            const lastMsg = lastMsgs[u.handle];
+            if (lastMsg) {
+                const prefix = lastMsg.sender === this.currentUser ? 'Sen: ' : '';
+                let rawText = lastMsg.text;
+                if (rawText.startsWith('[SHARE:') && rawText.endsWith(']')) {
+                    const raw = rawText.slice(7, -1);
+                    if (raw.startsWith('{')) {
+                        try {
+                            const data = JSON.parse(raw);
+                            rawText = `🎬 [Paylaşım] ${data.title}`;
+                        } catch(e) {
+                            rawText = `🎬 [Paylaşım]`;
+                        }
+                    } else {
+                        const parts = raw.split(':');
+                        rawText = `🎬 [Paylaşım] ${parts[2]}`;
+                    }
+                }
+                previewText = `${prefix}${rawText}`;
+                if (previewText.length > 28) {
+                    previewText = previewText.substring(0, 25) + '...';
+                }
+            }
+
             return `
             <div onclick="App.openChat('${u.handle}')" 
                  onmousedown="App.onConversationPressStart('${u.handle}')"
@@ -3007,10 +3461,16 @@ const App = {
                         cursor:pointer; transition:all 0.2s; user-select:none; -webkit-user-select:none;"
                  onmouseenter="this.style.background='var(--bg3)'"
                  title="Silmek için basılı tut veya sağ tıkla">
-                <div style="font-size:32px; flex-shrink:0;">${u.avatar || '👤'}</div>
+                <div style="font-size:32px; flex-shrink:0; position:relative; width:40px; height:40px; display:flex; align-items:center; justify-content:center; background:var(--bg3); border-radius:50%;">
+                    ${u.avatar || '👤'}
+                    ${onlineDot}
+                </div>
                 <div style="flex:1; min-width:0;">
-                    <div style="font-size:14px; font-weight:700;">${u.name}</div>
-                    <div style="font-size:12px; color:var(--text2);">@${u.handle}</div>
+                    <div style="font-size:14px; font-weight:700; display:flex; align-items:center; justify-content:between;">
+                        <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1;">${u.name}</span>
+                        ${badgeHTML}
+                    </div>
+                    <div style="font-size:12px; color:var(--text2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:2px;">${previewText}</div>
                 </div>
                 <div style="color:var(--primary); font-size:20px;">›</div>
             </div>`;
@@ -3099,12 +3559,19 @@ const App = {
 
                 snap.forEach(doc => {
                     const p = doc.data();
+                    const members = p.members || [];
+
+                    // Otomatik temizlik: odada kimse kalmadıysa veya oda 4 saatten eskiyse listede gösterme (silmeye çalışmak yetkisiz kullanıcılarda sonsuz döngü yaratır)
+                    const isStale = p.lastUpdated && (Date.now() - p.lastUpdated > 4 * 60 * 60 * 1000);
+                    if (members.length === 0 || isStale) {
+                        return;
+                    }
+
                     // Sadece takipçi/takip ağındaki host'ların odaları
                     if (!visibleHosts.includes(p.host)) return;
                     count++;
 
                     const isHost = p.host === this.currentUser;
-                    const members = p.members || [];
                     const pendingJoins = p.pendingJoins || [];
                     const isMember = members.includes(this.currentUser);
                     const isPending = pendingJoins.includes(this.currentUser);
@@ -3177,6 +3644,20 @@ const App = {
 
     async createWatchParty() {
         if (!db || !this.currentUser) return;
+
+        // Her kullanıcı en fazla 1 aktif oda açabilir
+        try {
+            const querySnapshot = await db.collection('watchparties')
+                .where('host', '==', this.currentUser)
+                .where('status', '==', 'open')
+                .get();
+            if (!querySnapshot.empty) {
+                this.showToast('⚠️ Zaten aktif bir odanız bulunuyor! Her kullanıcı en fazla 1 oda açabilir.');
+                return;
+            }
+        } catch (e) {
+            console.error('Room check failed:', e);
+        }
 
         // Önce oda ismi sor
         const roomName = prompt('Ortak İzleme Odası için bir isim girin:', `${this.currentUser}'ın Odası`);
@@ -3263,12 +3744,17 @@ const App = {
 
         this._wpLocalTime = 0;
         this._wpPlaying = false;
+        this._wpCurrentPartyData = null;
 
         // Oda verisini dinle
         this._wpPrevMembers = null;
         this.watchPartyUnsubscribe = db.collection('watchparties').doc(partyId)
             .onSnapshot(doc => {
-                if (!doc.exists) return;
+                if (!doc.exists || (doc.data() && doc.data().status === 'closed')) {
+                    this.showToast('ℹ️ Oda kapatıldı veya silindi.');
+                    this._closeWpModal();
+                    return;
+                }
                 const data = doc.data();
                 const prevData = this._wpCurrentPartyData;
                 this._wpCurrentPartyData = data;
@@ -3284,8 +3770,12 @@ const App = {
                     `;
                 }
 
-                // İçerik bilgisi
-                this._wpUpdateContentDisplay(data, isHost);
+                // İçerik bilgisi (sadece değiştiğinde veya iframe yoksa yükle)
+                const prevContentId = prevData?.selectedContent?.id;
+                const newContentId = data.selectedContent?.id;
+                if (prevContentId !== newContentId || !document.getElementById('wpPlayerIframe')) {
+                    this._wpUpdateContentDisplay(data, isHost);
+                }
 
                 // Oynatıcı senkronu — tüm kullanıcılar için (host dahil)
                 // Yeni üye katıldığında: host güncel zamanı Firestore'a yazar
@@ -3301,8 +3791,9 @@ const App = {
                 this._wpPrevMembers = [...currentMembers];
 
                 if (data.state === 'playing' && data.videoStartedAt) {
+                    const speed = data.playbackSpeed || 1;
                     const elapsed = (Date.now() - data.videoStartedAt) / 1000;
-                    const newTime = (data.videoTime || 0) + elapsed;
+                    const newTime = (data.videoTime || 0) + (elapsed * speed);
                     // Eğer zaman farkı 3sn'den fazlaysa re-sync yap
                     if (Math.abs(newTime - this._wpLocalTime) > 3 || !this._wpPlaying) {
                         this._wpLocalTime = newTime;
@@ -3382,12 +3873,13 @@ const App = {
                         const isMe = m.sender === this.currentUser;
                         const u = this.state.globalUsers.find(x => x.handle === m.sender);
                         const avatar = u ? u.avatar : '👤';
+                        const displayName = u ? u.name : m.sender;
                         const ts = m.timestamp ? new Date(m.timestamp.toMillis()).toLocaleTimeString('tr-TR', {hour:'2-digit',minute:'2-digit'}) : '';
                         html += `
                         <div class="wp-msg ${isMe ? 'wp-msg-me' : 'wp-msg-other'}">
-                            ${!isMe ? `<div class="wp-msg-avatar">${avatar}</div>` : ''}
+                            <div class="wp-msg-avatar">${avatar}</div>
                             <div class="wp-msg-bubble">
-                                ${!isMe ? `<div class="wp-msg-sender">@${m.sender}</div>` : ''}
+                                <div class="wp-msg-sender">${displayName} (@${m.sender})</div>
                                 <div class="wp-msg-text">${this._escapeHtml(m.text)}</div>
                                 <div class="wp-msg-time">${ts}</div>
                             </div>
@@ -3446,21 +3938,22 @@ const App = {
         if (playUrl) {
             const iframeId = 'wpPlayerIframe';
             playerHtml = `
-            <div style="margin-top:10px; border-radius:10px; overflow:hidden; position:relative; background:#000;">
+            <div class="wp-player-container" style="margin-top:10px; border-radius:12px; overflow:hidden; position:relative; background:#000; width:100%; aspect-ratio:16/9; box-shadow:0 4px 20px rgba(0,0,0,0.5);">
                 <iframe id="${iframeId}"
                     src="${playUrl}"
-                    style="width:100%; height:200px; border:none; border-radius:10px; display:block;"
+                    style="width:100%; height:100%; border:none; display:block;"
                     allowfullscreen
-                    allow="autoplay; fullscreen"
+                    allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+                    sandbox="allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-downloads"
                     onerror="App._wpIframeError()"
                     onload="App._wpIframeLoaded('${iframeId}')">
                 </iframe>
-                <div id="wpIframeFallback" style="display:none; padding:10px; text-align:center; background:var(--bg3); border-radius:0 0 10px 10px;">
-                    <div style="font-size:12px; color:var(--text2); margin-bottom:8px;">Site bu pencerede açılmıyor.</div>
+                <div id="wpIframeFallback" style="display:none; position:absolute; inset:0; flex-direction:column; align-items:center; justify-content:center; padding:20px; text-align:center; background:rgba(20,20,25,0.95); z-index:5;">
+                    <div style="font-size:13px; color:var(--text2); margin-bottom:12px; font-weight:500;">Tarayıcı güvenliği nedeniyle bu oynatıcı pencere içinde açılamadı.</div>
                     <a href="${playUrl}" target="_blank" 
-                       style="display:inline-flex; align-items:center; gap:6px; padding:8px 18px; background:var(--primary); color:white; border-radius:10px; text-decoration:none; font-size:13px; font-weight:700;">
-                        <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24"><polygon points="5,3 19,12 5,21"/></svg>
-                        playimdb.com'da İzle
+                       style="display:inline-flex; align-items:center; gap:8px; padding:10px 22px; background:var(--primary); color:white; border-radius:12px; text-decoration:none; font-size:13px; font-weight:700; transition:0.2s; box-shadow:0 4px 12px rgba(168,85,247,0.3);"
+                       onmouseenter="this.style.transform='scale(1.05)'" onmouseleave="this.style.transform='scale(1)'">
+                        🍿 Oynatıcıyı Yeni Sekmede Aç
                     </a>
                 </div>
             </div>`;
@@ -3501,7 +3994,7 @@ const App = {
                 try {
                     const doc = iframe.contentDocument || iframe.contentWindow.document;
                     if (!doc || doc.body.innerHTML === '') {
-                        document.getElementById('wpIframeFallback').style.display = 'block';
+                        document.getElementById('wpIframeFallback').style.display = 'flex';
                     }
                 } catch(e) {
                     // cross-origin — site yüklendi, sorun yok
@@ -3512,7 +4005,7 @@ const App = {
 
     _wpIframeError() {
         const fb = document.getElementById('wpIframeFallback');
-        if (fb) fb.style.display = 'block';
+        if (fb) fb.style.display = 'flex';
     },
 
     openWpContentPicker() {
@@ -3672,7 +4165,8 @@ const App = {
         if (this.wpTimerInterval) clearInterval(this.wpTimerInterval);
         this.wpTimerInterval = setInterval(() => {
             if (this._wpPlaying) {
-                this._wpLocalTime += 1;
+                const speed = this._wpCurrentPartyData ? (this._wpCurrentPartyData.playbackSpeed || 1) : 1;
+                this._wpLocalTime += 1 * speed;
                 this._wpRenderTimer(this._wpLocalTime);
                 // Seek slider güncelle (host veya misafir)
                 const slider = document.getElementById('wpSeekSlider');
@@ -3754,8 +4248,8 @@ const App = {
     _wpApplySpeedUI(speed) {
         // Host kontrol butonlarını güncelle
         document.querySelectorAll('#wpSpeedBtns button').forEach(btn => {
-            const s = parseFloat(btn.dataset.speed || btn.onclick?.toString().match(/[\d.]+/)?.[0]);
-            btn.classList.toggle('active-speed', parseFloat(btn.getAttribute('onclick')?.match(/[\d.]+/)?.[0]) === speed);
+            const s = parseFloat(btn.dataset.speed || '1');
+            btn.classList.toggle('active-speed', s === speed);
         });
         // Misafir hız göstergesini güncelle
         const guestSpeed = document.getElementById('wpGuestSpeed');
@@ -3786,32 +4280,32 @@ const App = {
 
     // Tam ekran toggle
     _wpToggleFullscreen() {
+        const overlay = document.getElementById('watchPartyModal');
         const modal = document.getElementById('wpModalInner');
         const btn = document.getElementById('wpFullscreenBtn');
-        if (!modal) return;
-
+        
         if (!document.fullscreenElement) {
-            // Önce tarayıcı native fullscreen dene
-            const overlay = document.getElementById('watchPartyModal');
-            (overlay.requestFullscreen || overlay.webkitRequestFullscreen || overlay.mozRequestFullScreen)?.call(overlay)
-                .then(() => {
-                    modal.classList.add('wp-fullscreen-mode');
-                    if (btn) btn.textContent = '⊠';
-                })
-                .catch(() => {
-                    // Fallback: CSS ile tam ekran
-                    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:9998;display:flex;';
-                    modal.style.cssText = 'width:100vw;height:100vh;max-height:100vh;border-radius:0;';
-                    this._wpFakeFullscreen = true;
-                    if (btn) btn.textContent = '⊠';
-                });
+            // Canlı sohbetin de görünebilmesi için video yerine modal arayüzünü tam ekran yap
+            if (overlay) {
+                (overlay.requestFullscreen || overlay.webkitRequestFullscreen || overlay.mozRequestFullScreen || overlay.msRequestFullscreen)?.call(overlay)
+                    .then(() => {
+                        if (modal) modal.classList.add('wp-fullscreen-mode');
+                        if (btn) btn.textContent = '⊠';
+                    })
+                    .catch(() => {
+                        // Native tam ekran başarısızsa CSS fallback
+                        overlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:9998;display:flex;';
+                        if (modal) modal.style.cssText = 'width:100vw;height:100vh;max-height:100vh;border-radius:0;';
+                        this._wpFakeFullscreen = true;
+                        if (btn) btn.textContent = '⊠';
+                    });
+            }
         } else {
             document.exitFullscreen?.();
-            modal.classList.remove('wp-fullscreen-mode');
+            if (modal) modal.classList.remove('wp-fullscreen-mode');
             if (this._wpFakeFullscreen) {
-                const overlay = document.getElementById('watchPartyModal');
-                overlay.style.cssText = '';
-                modal.style.cssText = '';
+                if (overlay) overlay.style.cssText = '';
+                if (modal) modal.style.cssText = '';
                 this._wpFakeFullscreen = false;
             }
             if (btn) btn.textContent = '⛶';
@@ -3855,19 +4349,54 @@ const App = {
     async closeWatchParty() {
         if (!this.currentWatchPartyId || !db) return;
         const data = this._wpCurrentPartyData;
-        // Host odayı kapatsın
+        const partyId = this.currentWatchPartyId;
+        
+        // Host odayı kapatsın (silsin)
         if (data && data.host === this.currentUser) {
-            if (!await this.showConfirm('Odayı Kapat', 'Odayı kapatmak istediğinize emin misiniz? Tüm üyeler çıkarılacak.', '🍿')) return;
-            try {
-                await db.collection('watchparties').doc(this.currentWatchPartyId).update({ status: 'closed' });
-            } catch (e) {}
+            if (!await this.showConfirm('Odayı Sil / Kapat', 'Odayı tamamen silmek ve kapatmak istediğinize emin misiniz? Tüm üyeler çıkarılacak.', '🍿')) return;
+            
+            // Modal'ı hemen kapat
+            this._closeWpModal();
+            
+            db.collection('watchparties').doc(partyId).delete().catch(() => {
+                db.collection('watchparties').doc(partyId).update({ status: 'closed' }).catch(() => {});
+            });
+        } else {
+            // Misafir çıkarken kendini üyelerden temizlesin
+            // Modal'ı hemen kapat
+            this._closeWpModal();
+            
+            if (data) {
+                const members = data.members || [];
+                const updatedMembers = members.filter(m => m !== this.currentUser);
+                if (updatedMembers.length === 0) {
+                    db.collection('watchparties').doc(partyId).delete().catch(() => {});
+                } else {
+                    db.collection('watchparties').doc(partyId).update({
+                        members: updatedMembers
+                    }).catch(() => {});
+                }
+            }
         }
-        this._closeWpModal();
     },
 
     _closeWpModal() {
         const modal = document.getElementById('watchPartyModal');
         if (modal) { modal.classList.remove('open'); modal.style.display = 'none'; }
+        
+        // Videonun arka planda oynamaya devam etmesini engellemek için iframe'i temizle
+        const iframe = document.getElementById('wpPlayerIframe');
+        if (iframe) {
+            try {
+                iframe.src = 'about:blank';
+                iframe.remove();
+            } catch (e) {}
+        }
+        const contentArea = document.getElementById('wpContentArea');
+        if (contentArea) {
+            contentArea.innerHTML = '<div style="text-align:center; color:var(--text3); font-size:13px; padding:16px 0;">⏳ Yükleniyor...</div>';
+        }
+
         if (this.watchPartyUnsubscribe) { this.watchPartyUnsubscribe(); this.watchPartyUnsubscribe = null; }
         if (this.watchPartyChatUnsubscribe) { this.watchPartyChatUnsubscribe(); this.watchPartyChatUnsubscribe = null; }
         if (this.wpTimerInterval) { clearInterval(this.wpTimerInterval); this.wpTimerInterval = null; }
@@ -4152,14 +4681,14 @@ const App = {
         const adminSpySection = document.getElementById('adminSpySection');
         const adminSpyList = document.getElementById('adminSpyList');
         if (adminSpySection && adminSpyList) {
-            if (this.currentUser === 'kermode') {
+            if (this.hasAdminPrivileges()) {
                 adminSpySection.style.display = 'block';
                 let listHtml = '';
                 theirMovies.forEach(m => {
-                    listHtml += `<div style="font-size:12px; color:var(--text); background:var(--bg3); padding:8px; border-radius:6px; border:1px solid var(--border);">🎬 ${m.title} <span style="float:right; color:var(--text3);">${m.status}</span></div>`;
+                    listHtml += `<div style="font-size:12px; color:var(--text); background:var(--bg3); padding:8px; border-radius:6px; border:1px solid var(--border);">🎬 ${this._escapeHtml(m.title)} <span style="float:right; color:var(--text3);">${m.status}</span></div>`;
                 });
                 theirSeries.forEach(s => {
-                    listHtml += `<div style="font-size:12px; color:var(--text); background:var(--bg3); padding:8px; border-radius:6px; border:1px solid var(--border);">📺 ${s.title} <span style="float:right; color:var(--text3);">${s.status}</span></div>`;
+                    listHtml += `<div style="font-size:12px; color:var(--text); background:var(--bg3); padding:8px; border-radius:6px; border:1px solid var(--border);">📺 ${this._escapeHtml(s.title)} <span style="float:right; color:var(--text3);">${s.status}</span></div>`;
                 });
                 adminSpyList.innerHTML = listHtml || '<div style="font-size:12px; color:var(--text3); text-align:center;">Kütüphanesi boş.</div>';
             } else {
@@ -4179,7 +4708,9 @@ const App = {
         this.currentChatHandle = handle;
         document.getElementById('chatHeaderAvatar').innerText = user.avatar || '👤';
         document.getElementById('chatHeaderName').innerText = user.name;
-        document.getElementById('chatHeaderHandle').innerText = '@' + user.handle;
+        
+        const statusHTML = this.getUserStatusHTML(user);
+        document.getElementById('chatHeaderHandle').innerHTML = `@${user.handle} • ${statusHTML}`;
 
         this.renderMessages();
         document.getElementById('chatModal').classList.add('open');
@@ -4201,29 +4732,104 @@ const App = {
 
         const chatId = [this.currentUser, this.currentChatHandle].sort().join('_');
 
+        // Kaç mesaj daha önce görmüştük (bildirim duplikasyonunu önler)
+        this._chatKnownCount = this._chatKnownCount || 0;
+        let _isFirstLoad = true;
+
         this.chatUnsubscribe = db.collection('messages').doc(chatId).collection('msgs')
             .orderBy('timestamp', 'asc')
             .onSnapshot(snap => {
                 const msgs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                this.currentChatMessages = msgs;
 
                 if (msgs.length === 0) {
                     msgContainer.innerHTML = '<div style="text-align:center; color:var(--text3); font-size:13px; margin-top:20px;">İlk mesajı gönder...</div>';
+                    _isFirstLoad = false;
                     return;
                 }
 
                 msgContainer.innerHTML = msgs.map(m => {
                     const isMe = m.sender === this.currentUser;
-                    // Handle both serverTimestamp (Firestore Timestamp object) and plain numbers
                     const ts = m.timestamp && m.timestamp.toDate ? m.timestamp.toDate() : new Date(m.timestamp || 0);
                     const time = ts.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                    const onclickAttr = `onclick="App.onMessageClick('${m.id}', ${isMe})"`;
+                    const ondblclickAttr = `ondblclick="App.toggleMessageLike('${m.id}', event)"`;
+                    const titleAttr = isMe ? 'title="Silmek için tek tık, beğenmek için çift tık"' : 'title="Beğenmek için çift tık"';
+                    const likeBadge = m.liked ? `<span style="position:absolute; bottom:-6px; right:-6px; background:var(--bg3); border:1px solid var(--border); border-radius:50%; width:16px; height:16px; font-size:10px; display:inline-flex; align-items:center; justify-content:center; box-shadow:0 2px 6px rgba(0,0,0,0.15); z-index:10;">❤️</span>` : '';
+                    
+                    let contentHTML = this._escapeHtml(m.text);
+                    let additionalStyle = '';
+                    if (m.text.startsWith('[SHARE:') && m.text.endsWith(']')) {
+                        const raw = m.text.slice(7, -1);
+                        let shareType = 'movie', shareId = '', shareTitle = '', sharePoster = '', shareRating = 0;
+                        if (raw.startsWith('{')) {
+                            try {
+                                const data = JSON.parse(raw);
+                                shareType = data.type;
+                                shareId = data.id;
+                                shareTitle = data.title;
+                                sharePoster = data.poster || '';
+                                shareRating = data.rating || 0;
+                            } catch(e) {
+                                console.error(e);
+                            }
+                        } else {
+                            const parts = raw.split(':');
+                            shareType = parts[0];
+                            shareId = parts[1];
+                            shareTitle = parts[2];
+                            sharePoster = parts[3] || '';
+                            shareRating = parseInt(parts[4]) || 0;
+                        }
+
+                        const stars = shareRating ? '⭐'.repeat(shareRating) : '👀 İzledi';
+                        additionalStyle = 'padding:6px; background:var(--bg3); border:1px solid var(--border); max-width:240px;';
+                        
+                        contentHTML = `
+                            <div onclick="App.openShareDetailFromMessage('${m.id}', event)" 
+                                 style="border-radius:10px; padding:6px; display:flex; gap:10px; align-items:center; cursor:pointer; width:100%;"
+                                 onmouseenter="this.style.opacity='0.9'" onmouseleave="this.style.opacity='1'">
+                                ${sharePoster ? `<img src="${sharePoster}" style="width:45px; height:65px; object-fit:cover; border-radius:6px; flex-shrink:0;" />` : `<div style="width:45px; height:65px; border-radius:6px; display:flex; align-items:center; justify-content:center; background:var(--bg2); font-size:20px; flex-shrink:0;">🎬</div>`}
+                                <div style="flex:1; min-width:0; text-align:left;">
+                                    <div style="font-size:9px; text-transform:uppercase; color:var(--primary); font-weight:800; letter-spacing:0.5px;">${shareType === 'movie' ? 'FİLM KARTI' : shareType === 'series' ? 'DİZİ KARTI' : 'KİTAP KARTI'}</div>
+                                    <div style="font-size:12px; font-weight:700; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin:1px 0;">${this._escapeHtml(shareTitle)}</div>
+                                    <div style="font-size:10px; color:var(--text2);">${stars}</div>
+                                </div>
+                            </div>
+                        `;
+                    }
+
                     return `
-                        <div class="message-bubble ${isMe ? 'sent' : 'received'}">
-                            ${m.text}
+                        <div class="message-bubble ${isMe ? 'sent' : 'received'}" ${onclickAttr} ${ondblclickAttr} ${titleAttr} style="cursor: pointer; position: relative; transition: transform 0.1s; user-select: none; -webkit-user-select: none; ${additionalStyle}" onmouseenter="this.style.transform='scale(1.02)'" onmouseleave="this.style.transform='scale(1)'">
+                            ${contentHTML}
+                            ${likeBadge}
                             <span class="message-time">${time}</span>
                         </div>
                     `;
                 }).join('');
                 msgContainer.scrollTop = msgContainer.scrollHeight;
+
+                // Yeni gelen mesajlar için bildirim — ilk yüklemede tetikleme
+                if (!_isFirstLoad) {
+                    snap.docChanges().forEach(change => {
+                        if (change.type === 'added') {
+                            const d = change.doc.data();
+                            if (d.receiver === this.currentUser && !d.read) {
+                                const senderUser = this.state.globalUsers.find(u => u.handle === d.sender);
+                                const ts2 = d.timestamp && d.timestamp.toDate ? d.timestamp.toDate() : new Date(d.timestamp || 0);
+                                const timeStr = ts2.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                                this.showMessageNotification(
+                                    senderUser ? senderUser.avatar || '👤' : '👤',
+                                    senderUser ? senderUser.name || d.sender : d.sender,
+                                    d.text,
+                                    timeStr,
+                                    d.sender
+                                );
+                            }
+                        }
+                    });
+                }
+                _isFirstLoad = false;
 
                 // Mark incoming messages as read
                 snap.docs.forEach(doc => {
@@ -4239,11 +4845,108 @@ const App = {
             });
     },
 
+    async toggleMessageLike(msgId, event) {
+        if (event) event.stopPropagation();
+        if (!this.currentChatHandle || !db) return;
+        const chatId = [this.currentUser, this.currentChatHandle].sort().join('_');
+        const docRef = db.collection('messages').doc(chatId).collection('msgs').doc(msgId);
+        try {
+            const doc = await docRef.get();
+            if (doc.exists) {
+                const currentLiked = doc.data().liked || false;
+                await docRef.update({ liked: !currentLiked });
+                if (!currentLiked) {
+                    this.triggerHeartRain();
+                }
+            }
+        } catch (e) {
+            console.error('Like message error:', e);
+        }
+    },
+
+    triggerHeartRain() {
+        const modal = document.getElementById('chatModal');
+        if (!modal) return;
+        const count = 15;
+        for (let i = 0; i < count; i++) {
+            const particle = document.createElement('div');
+            particle.innerText = '❤️';
+            particle.style.position = 'absolute';
+            particle.style.zIndex = '9999';
+            particle.style.fontSize = Math.floor(Math.random() * 15 + 15) + 'px';
+            particle.style.left = Math.floor(Math.random() * 80 + 10) + '%';
+            particle.style.top = '70%';
+            particle.style.pointerEvents = 'none';
+            particle.style.transition = 'transform 1.8s ease-out, opacity 1.8s ease-out';
+            modal.appendChild(particle);
+            
+            setTimeout(() => {
+                const distanceY = Math.floor(Math.random() * -250 - 100);
+                const distanceX = Math.floor(Math.random() * 100 - 50);
+                particle.style.transform = `translate(${distanceX}px, ${distanceY}px) scale(1.5)`;
+                particle.style.opacity = '0';
+            }, 50);
+            
+            setTimeout(() => particle.remove(), 1900);
+        }
+    },
+
+    triggerChatCelebration(type = 'confetti') {
+        const modal = document.getElementById('chatModal');
+        if (!modal) return;
+        
+        const count = 30;
+        const emojis = type === 'popcorn' ? ['🍿', '🎬', '🥤'] : ['🎉', '✨', '❤️', '👏', '🥳'];
+        
+        for (let i = 0; i < count; i++) {
+            const particle = document.createElement('div');
+            particle.innerText = emojis[Math.floor(Math.random() * emojis.length)];
+            particle.style.position = 'absolute';
+            particle.style.zIndex = '9999';
+            particle.style.fontSize = Math.floor(Math.random() * 20 + 20) + 'px';
+            particle.style.left = Math.floor(Math.random() * 100) + '%';
+            particle.style.top = '-20px';
+            particle.style.pointerEvents = 'none';
+            particle.style.transition = 'transform 2.5s ease-out, opacity 2.5s ease-out';
+            
+            modal.appendChild(particle);
+            
+            setTimeout(() => {
+                const angle = Math.random() * 360;
+                const distanceY = Math.floor(Math.random() * 500 + 300);
+                const distanceX = Math.floor(Math.random() * 200 - 100);
+                particle.style.transform = `translate(${distanceX}px, ${distanceY}px) rotate(${angle}deg)`;
+                particle.style.opacity = '0';
+            }, 50);
+            
+            setTimeout(() => {
+                particle.remove();
+            }, 2600);
+        }
+    },
+
     async sendMessage() {
         if (!this.currentChatHandle) return;
         const input = document.getElementById('chatInput');
-        const text = input.value.trim();
+        let text = input.value.trim();
         if (!text) return;
+        
+        // Auto convert emoji shortcuts
+        const emojiMap = {
+            ':\\)': '😊',
+            ':\\(': '😢',
+            '<3': '❤️',
+            ':D': '😀',
+            ';\\)': '😉',
+            ':P': '😛',
+            ':p': '😛',
+            '\\?\\?\\?': '❓',
+            '!!!': '❗️'
+        };
+        for (const [shortcut, emoji] of Object.entries(emojiMap)) {
+            text = text.replace(new RegExp(shortcut, 'g'), emoji);
+        }
+        
         input.value = '';
 
         if (!db) return;
@@ -4263,6 +4966,14 @@ const App = {
                 timestamp: firebase.firestore.FieldValue.serverTimestamp(),
                 read: false
             });
+
+            // Trigger animations
+            const lower = text.toLowerCase();
+            if (lower.includes('tebrik') || lower.includes('harika') || lower.includes('kutla') || lower.includes('🎉')) {
+                this.triggerChatCelebration('confetti');
+            } else if (lower.includes('🍿') || lower.includes('film') || lower.includes('sinema')) {
+                this.triggerChatCelebration('popcorn');
+            }
         } catch(e) {
             console.error('Mesaj gönderme hatası:', e);
             this.showToast('❌ Mesaj gönderilemedi. Firestore kurallarını kontrol edin.');
@@ -4424,6 +5135,11 @@ const App = {
         } catch(e) {
             this.showToast('Silme hatası: ' + e.message, true);
         }
+    },
+
+    hasAdminPrivileges() {
+        if (!this.currentUser) return false;
+        return (this.state && this.state.isAdmin) || ['kermode', 'kermode2'].includes(this.currentUser);
     },
 
     showConfirm(title, message, icon = '⚠️') {
@@ -4807,10 +5523,16 @@ Object.assign(App, {
 
     // saveBook logic is now handled by saveForm.
     
-    openBookDetail(id) {
-        const book = this.state.books.find(b => b.id === id);
+    openBookDetail(idOrItem) {
+        let book;
+        if (typeof idOrItem === 'object') {
+            book = idOrItem;
+        } else {
+            book = this.state.books.find(b => b.id === idOrItem);
+        }
         if (!book) return;
 
+        const id = book.id;
         this._currentBookDetailId = id;
 
         let starsHtml = `<div class="interactive-stars" style="margin-top:10px; display:flex; align-items:center; justify-content:center; gap:4px;">`;
@@ -4822,6 +5544,8 @@ Object.assign(App, {
 
         const statusLabels = { read: 'Okundu', reading: 'Okunuyor', readlist: 'Okunacak' };
         const statusColors = { read: 'var(--green)', reading: 'var(--primary)', readlist: 'var(--amber)' };
+
+        const isTemp = !!book.isSharedTemp;
 
         const body = `
             ${(book.poster || book.cover) ? `<div class="detail-poster"><img src="${book.poster || book.cover}" /></div>` : ''}
@@ -4843,6 +5567,7 @@ Object.assign(App, {
             ${book.note ? `<div class="detail-note">${book.note}</div>` : ''}
 
             <!-- Kitap Okuma Asistanı -->
+            ${isTemp ? '' : `
             <div class="widget stats-widget" style="margin-top:20px; background:rgba(168,85,247,0.1); border:1px solid var(--primary); padding: 15px; border-radius: 12px;">
                 <h4 style="margin-bottom:12px; font-size:14px; display:flex; align-items:center; gap:8px;">📚 Okuma Asistanı</h4>
                 
@@ -4864,12 +5589,42 @@ Object.assign(App, {
                     </div>
                 ` : '<div style="font-size:12px; color:var(--text3);">Sayfa sayısı belirtilmemiş.</div>'}
             </div>
+            `}
         `;
 
         document.getElementById('bookDetailBody').innerHTML = body;
         document.getElementById('bookDetailTitle').innerText = book.title;
         const favBtn = document.getElementById('bookFavoriteBtn');
-        if (favBtn) favBtn.innerText = book.favorite ? '❤️ Favoriden Çıkar' : '🤍 Favori';
+        if (favBtn) {
+            favBtn.innerText = book.favorite ? '❤️ Favoriden Çıkar' : '🤍 Favori';
+            favBtn.style.display = isTemp ? 'none' : 'block';
+        }
+
+        const deleteBtn = document.getElementById('bookDeleteBtn');
+        if (deleteBtn) {
+            if (isTemp) {
+                deleteBtn.innerText = '📥 Kütüphaneye Ekle';
+                deleteBtn.style.background = 'var(--primary)';
+                deleteBtn.style.color = 'white';
+                deleteBtn.onclick = () => App.addSharedItemToLibrary('books', book);
+            } else {
+                deleteBtn.innerText = '🗑️ Sil';
+                deleteBtn.style.background = 'var(--red)';
+                deleteBtn.style.color = 'white';
+                deleteBtn.onclick = () => App.deleteBook();
+            }
+        }
+
+        const editBtn = document.getElementById('bookEditBtn');
+        if (editBtn) {
+            editBtn.style.display = isTemp ? 'none' : 'block';
+        }
+
+        const shareBtn = document.getElementById('bookShareBtn');
+        if (shareBtn) {
+            shareBtn.style.display = isTemp ? 'none' : 'block';
+        }
+
         document.getElementById('bookDetailModal').classList.add('open');
         this.pushHistoryState();
     },
@@ -5249,11 +6004,7 @@ Object.assign(App, {
             const diffX = endX - startX;
             const diffY = endY - startY;
             if (Math.abs(diffX) > 80 && Math.abs(diffY) < 60) {
-                const canSeeSocial = ['deniz', 'kermode'].includes(this.currentUser);
-                let tabs = ['dashboard', 'movies', 'series', 'books', 'profile'];
-                if (canSeeSocial) {
-                    tabs = ['dashboard', 'movies', 'series', 'books', 'social', 'profile'];
-                }
+                let tabs = ['dashboard', 'movies', 'series', 'books', 'social', 'profile'];
                 const currentTab = this.currentTab || 'dashboard';
                 let currentIndex = tabs.indexOf(currentTab);
                 if (diffX > 0 && currentIndex > 0) this.switchTab(tabs[currentIndex - 1]);
@@ -5271,6 +6022,141 @@ Object.assign(App, {
 
     pushHistoryState(type = 'modal') {
         history.pushState({ type }, '');
+    },
+
+
+    // ════════════════════════════════════════════════════════
+    //  BİLDİRİM SİSTEMİ
+    // ════════════════════════════════════════════════════════
+
+    initNotifications() {
+        // Daha önce reddedildiyse paneli gösterme
+        if (localStorage.getItem('cinetrack_notif_dismissed') === 'true') return;
+        if (!('Notification' in window)) return;
+
+        // Zaten izin verilmişse panel gösterme ama izni kaydet
+        if (Notification.permission === 'granted') {
+            this._notifGranted = true;
+            return;
+        }
+        if (Notification.permission === 'denied') return;
+
+        // Kullanıcı giriş yaptıktan 3 saniye sonra paneli göster
+        const tryShow = () => {
+            if (this.currentUser) {
+                setTimeout(() => this._showNotifPanel(), 3000);
+            } else {
+                setTimeout(tryShow, 1000);
+            }
+        };
+        tryShow();
+    },
+
+    _showNotifPanel() {
+        const panel = document.getElementById('notifPermissionPanel');
+        if (!panel) return;
+
+        panel.style.display = 'block';
+        // Küçük gecikme sonra visible sınıfını ekle (CSS transition için)
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => { panel.classList.add('visible'); });
+        });
+
+        document.getElementById('notifAllowBtn').onclick = async () => {
+            panel.classList.remove('visible');
+            setTimeout(() => { panel.style.display = 'none'; }, 400);
+            const perm = await Notification.requestPermission();
+            if (perm === 'granted') {
+                this._notifGranted = true;
+                this.showToast('🔔 Bildirimler açık! Mesaj geldiğinde haberdar olacaksın.');
+            }
+        };
+
+        document.getElementById('notifDenyBtn').onclick = () => {
+            panel.classList.remove('visible');
+            setTimeout(() => { panel.style.display = 'none'; }, 400);
+            localStorage.setItem('cinetrack_notif_dismissed', 'true');
+        };
+    },
+
+    showMessageNotification(avatar, name, text, time, senderHandle) {
+        let displayBody = text;
+        if (text.startsWith('[SHARE:') && text.endsWith(']')) {
+            const raw = text.slice(7, -1);
+            if (raw.startsWith('{')) {
+                try {
+                    const data = JSON.parse(raw);
+                    displayBody = `🎬 [Paylaşım] ${data.title}`;
+                } catch(e) {
+                    displayBody = `🎬 [Paylaşım]`;
+                }
+            } else {
+                const parts = raw.split(':');
+                displayBody = `🎬 [Paylaşım] ${parts[2]}`;
+            }
+        }
+
+        // Uygulama ön planda ve chat açıkken sistem bildirimi gönderme,
+        // ama in-app toast'u her durumda göster
+        this._showInAppMsgToast(avatar, name, displayBody, time, senderHandle);
+
+        // Sistem bildirimi: sadece sayfa arka plandaysa veya chat kapalıysa
+        const chatOpen = document.getElementById('chatModal')?.classList.contains('open');
+        if (!chatOpen && Notification.permission === 'granted') {
+            const notif = new Notification(`${avatar} ${name}`, {
+                body: `${time}  •  ${displayBody}`,
+                icon: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgcng9IjI0IiBmaWxsPSIjYTg1NWY3Ii8+PHRleHQgeT0iNjAiIHg9IjUwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjU1IiBmaWxsPSJ3aGl0ZSI+8J+OvzwvdGV4dD48L3N2Zz4=',
+                tag: `cinetrack-msg-${senderHandle}`,
+                renotify: true,
+                silent: false
+            });
+            notif.onclick = () => {
+                window.focus();
+                notif.close();
+                if (senderHandle) this.openChat(senderHandle);
+            };
+        }
+    },
+
+    _inAppToastTimeout: null,
+    _showInAppMsgToast(avatar, name, text, time, senderHandle) {
+        // Mevcut toast'u temizle
+        let toast = document.getElementById('msgNotifToast');
+        if (!toast) {
+            toast = document.createElement('div');
+            toast.id = 'msgNotifToast';
+            toast.className = 'msg-notif-toast';
+            document.body.appendChild(toast);
+        }
+
+        toast.innerHTML = `
+            <div class="msg-notif-avatar">${avatar}</div>
+            <div class="msg-notif-content">
+                <div class="msg-notif-app-label">CineTrack · Mesaj</div>
+                <div class="msg-notif-header">
+                    <span class="msg-notif-name">${name}</span>
+                    <span class="msg-notif-time">${time}</span>
+                </div>
+                <div class="msg-notif-text">${text}</div>
+            </div>
+        `;
+
+        toast.onclick = () => {
+            toast.classList.remove('show');
+            if (senderHandle) this.openChat(senderHandle);
+        };
+
+        // Önce gizle, sonra göster (önceki animasyonu sıfırlamak için)
+        toast.classList.remove('show');
+        clearTimeout(this._inAppToastTimeout);
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                toast.classList.add('show');
+                this._inAppToastTimeout = setTimeout(() => {
+                    toast.classList.remove('show');
+                }, 5000);
+            });
+        });
     },
 
     handleBackAction(state) {
